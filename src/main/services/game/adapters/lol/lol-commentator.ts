@@ -1,6 +1,6 @@
 import { localizeLine } from '../../../../../shared/lines'
 import { LANGUAGE_NAMES } from '../../game-commentary'
-import { isCloudMode, llmFetch } from '../../../llm-gateway'
+import { isRemoteMode, llmFetch } from '../../../llm-gateway'
 import { llmBody } from '../../../user-profile'
 /**
  * LLM-written League of Legends commentary. Each event is turned into a short facts prompt
@@ -96,7 +96,7 @@ export class LolCommentator {
   /** Loads the model into VRAM ahead of time (a cold 14b load can take ~100s on first use) */
   private warmedAt = 0
   private warmup(): void {
-    if (isCloudMode() || Date.now() - this.warmedAt < 15 * 60 * 1000) return
+    if (isRemoteMode() || Date.now() - this.warmedAt < 15 * 60 * 1000) return
     this.warmedAt = Date.now()
     const base = this.ollamaBase()
     this.resolveModel(base)

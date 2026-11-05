@@ -56,7 +56,7 @@ export const DevDeckView: React.FC = () => {
   // A cloud model is chosen in the settings: the top bar only shows it
   useEffect(() => {
     if (isSettingsOpen) return
-    window.api?.agent.getLlmSettings().then((s) => setCloudModel(s.provider === 'cloud' ? s.model : null))
+    window.api?.agent.getLlmSettings().then((s) => setCloudModel(s.provider === 'claude-code' ? `Claude Code (${s.claudeModel})` : s.provider === 'cloud' ? s.model : null))
     window.api?.agent.detectOllama().then((res) => res && setOllamaStatus(res))
   }, [isSettingsOpen, setOllamaStatus])
 

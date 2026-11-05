@@ -172,6 +172,8 @@ export const es: Messages = {
   llm_title: 'Capri // Cerebro',
   llm_local: 'En esta PC',
   llm_localDesc: 'Gratis y privado, con Ollama. Necesita una PC potente y unos 6 GB.',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: 'Usa la conexión de tu CLI Claude, sin una API key adicional. Haiku es la opción más rápida.',
   llm_cloud: 'Modelo en la nube (API)',
   llm_cloudDesc: 'Cualquier proveedor compatible con OpenAI. Necesita una API key y te cobra por uso.',
   llm_provider: 'Proveedor',

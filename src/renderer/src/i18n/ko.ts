@@ -172,6 +172,8 @@ export const ko: Messages = {
   llm_title: '카프리 // 두뇌',
   llm_local: '이 PC에서',
   llm_localDesc: 'Ollama로 무료이며 비공개입니다. 고성능 PC와 약 6GB가 필요합니다.',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: 'Claude CLI 연결 설정을 사용합니다. 추가 API 키가 필요 없습니다. Haiku가 가장 빠릅니다.',
   llm_cloud: '클라우드 모델 (API)',
   llm_cloudDesc: 'OpenAI 호환 제공 업체라면 모두 가능합니다. API 키가 필요하며 사용량만큼 요금이 부과됩니다.',
   llm_provider: '제공 업체',

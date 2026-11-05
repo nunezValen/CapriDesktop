@@ -1,4 +1,4 @@
-import { isCloudMode, llmFetch } from './llm-gateway'
+import { isRemoteMode, llmFetch } from './llm-gateway'
 import { envFilePath, localFfmpegPath, pythonPath, scriptPath, voiceDataDir } from './app-paths'
 import { spawn, ChildProcess } from 'child_process'
 import { stripLookTags } from './script/look-tags'
@@ -460,7 +460,7 @@ export class VoiceService {
 
   /** Loads the translation model into VRAM ahead of time (a cold load can take ~40s on this PC). */
   public warmTranslator(): void {
-    if (this.translatorWarm || isCloudMode()) return
+    if (this.translatorWarm || isRemoteMode()) return
     this.translatorWarm = true
     this.pickTranslatorModel()
       .then((model) => {

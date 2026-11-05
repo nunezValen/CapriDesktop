@@ -35,6 +35,10 @@ Capri is a netrunner companion inspired by *Cyberpunk: Edgerunners*: playful, mi
 
 ## 2. Voice: speaking and listening
 
+### LLM providers
+
+Choose local Ollama, an OpenAI-compatible cloud API, or **Claude Code** in the LLM settings. The Claude Code option only appears when Claude Code is installed or already saved as your provider. Claude Code uses the installed `claude` CLI and its existing connection: your signed-in subscription or the connection variables in `~/.claude/settings.json` (respecting `CLAUDE_CONFIG_DIR`), including a CLIProxy endpoint and token. Choose Haiku (the default for live commentary), Sonnet or Opus, and use **Test** to check the connection. Requests run without saved sessions, Claude Code tools, memory, hooks, plugins, skills or MCP; only Capri's prompts are supplied. Conversations and images go to the configured service.
+
 ### A. Voice providers (Edge-TTS / Fish Audio / ElevenLabs)
 The provider is picked in **TTS CONFIG** in the Dev Deck:
 - **Edge-TTS** (default, free): Microsoft neural voices, e.g. `en-US-AriaNeural` for English and `es-AR-ElenaNeural` for Spanish, plus Japanese, French, German, Portuguese, Italian, Russian and Chinese voices.

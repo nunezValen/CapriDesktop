@@ -172,6 +172,8 @@ export const ja: Messages = {
   llm_title: 'カプリ // 頭脳',
   llm_local: 'このPCで',
   llm_localDesc: 'Ollamaで無料かつプライベート。高性能なPCと約6 GBが必要です。',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: 'Claude CLIの接続設定を使用します。追加のAPIキーは不要です。Haikuが最速です。',
   llm_cloud: 'クラウドモデル (API)',
   llm_cloudDesc: 'OpenAI互換のプロバイダーならどれでも。APIキーが必要で、使用量に応じて課金されます。',
   llm_provider: 'プロバイダー',

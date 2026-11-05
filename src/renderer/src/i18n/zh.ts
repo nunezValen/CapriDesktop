@@ -172,6 +172,8 @@ export const zh: Messages = {
   llm_title: 'Capri // 大脑',
   llm_local: '在这台电脑上',
   llm_localDesc: '通过 Ollama 免费且私密。需要性能较好的电脑和约 6 GB 空间。',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: '使用 Claude CLI 的连接配置，无需额外 API 密钥。Haiku 速度最快。',
   llm_cloud: '云端模型 (API)',
   llm_cloudDesc: '任何兼容 OpenAI 的服务商。需要 API 密钥,并按用量计费。',
   llm_provider: '服务商',

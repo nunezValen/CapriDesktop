@@ -1,5 +1,5 @@
 import { scriptPlayer } from '../services/script/script-player'
-import { getLlmSettings, isCloudMode } from '../services/llm-gateway'
+import { getLlmSettings, isRemoteMode } from '../services/llm-gateway'
 import { personalize } from '../services/user-profile'
 import { consciousnessService } from '../services/consciousness-service'
 import { localizeLine } from '../../shared/lines'
@@ -220,7 +220,10 @@ export class AgentManager extends EventEmitter {
   }
 
   public async detectOllama(): Promise<{ running: boolean; models: string[] }> {
-    if (isCloudMode()) return { running: true, models: [getLlmSettings().model] }
+    if (isRemoteMode()) {
+      const settings = getLlmSettings()
+      return { running: true, models: [settings.provider === 'claude-code' ? settings.claudeModel : settings.model] }
+    }
     return await ollamaService.ensureRunning()
   }
 

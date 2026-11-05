@@ -170,6 +170,8 @@ export const en = {
   llm_title: 'Capri // Brain',
   llm_local: 'On this PC',
   llm_localDesc: 'Free and private, with Ollama. Needs a capable PC and about 6 GB.',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: 'Uses your signed-in Claude CLI connection, without an extra API key. Haiku is the fastest option.',
   llm_cloud: 'Cloud model (API)',
   llm_cloudDesc: 'Any OpenAI-compatible provider. Needs an API key and bills you for what you use.',
   llm_provider: 'Provider',

@@ -1,5 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
-import { Check, Cloud, Cpu, Key, List, Loader2, Server, ShieldAlert, X } from 'lucide-react'
+import { Check, Cloud, Cpu, Key, List, Loader2, Server, ShieldAlert, Terminal, X } from 'lucide-react'
 import { MessageKey } from '../i18n'
 import { useT } from '../utils/useUiLang'
 
@@ -34,13 +34,16 @@ export interface LlmProviderFormHandle {
   save: () => Promise<boolean>
 }
 
-export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderChange?: (provider: 'local' | 'cloud') => void }>(
+export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderChange?: (provider: 'local' | 'cloud' | 'claude-code') => void }>(
   ({ onProviderChange }, ref) => {
     const t = useT()
-    const [provider, setProvider] = useState<'local' | 'cloud'>('local')
+    const [provider, setProvider] = useState<'local' | 'cloud' | 'claude-code'>('local')
+    const [claudeInstalled, setClaudeInstalled] = useState(false)
+    const [savedClaudeProvider, setSavedClaudeProvider] = useState(false)
     const [preset, setPreset] = useState('openai')
     const [baseUrl, setBaseUrl] = useState(PRESETS[0].baseUrl)
     const [model, setModel] = useState('')
+    const [claudeModel, setClaudeModel] = useState<'haiku' | 'sonnet' | 'opus'>('haiku')
     const [apiKey, setApiKey] = useState('')
     const [hasKey, setHasKey] = useState(false)
     const [models, setModels] = useState<string[]>([])
@@ -48,18 +51,21 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
     const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
 
     useEffect(() => {
+      window.api?.agent?.isClaudeInstalled?.().then(setClaudeInstalled).catch(() => setClaudeInstalled(false))
       window.api?.agent?.getLlmSettings?.().then((s) => {
         if (!s) return
         setProvider(s.provider)
+        setSavedClaudeProvider(s.provider === 'claude-code')
         if (s.preset) setPreset(s.preset)
         if (s.baseUrl) setBaseUrl(s.baseUrl)
         setModel(s.model)
+        setClaudeModel(s.claudeModel)
         setHasKey(s.hasKey)
         onProviderChange?.(s.provider)
       })
     }, [])
 
-    const choose = (next: 'local' | 'cloud') => {
+    const choose = (next: 'local' | 'cloud' | 'claude-code') => {
       setProvider(next)
       setNotice(null)
       onProviderChange?.(next)
@@ -86,10 +92,12 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
     }
 
     const test = async () => {
-      if (!model.trim()) return fail('missing-model')
+      if (provider === 'cloud' && !model.trim()) return fail('missing-model')
       setBusy('test')
       setNotice(null)
-      const res = await window.api.agent.testLlm(baseUrl, model.trim(), apiKey || undefined)
+      const res = provider === 'claude-code'
+        ? await window.api.agent.testClaude(claudeModel)
+        : await window.api.agent.testLlm(baseUrl, model.trim(), apiKey || undefined)
       setBusy(null)
       if (res.ok) setNotice({ ok: true, text: t('llm_testOk') })
       else fail(res.error)
@@ -105,6 +113,7 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
         const res = await window.api.agent.setLlmSettings(
           provider === 'local'
             ? { provider: 'local' }
+            : provider === 'claude-code' ? { provider, claudeModel }
             : { provider: 'cloud', preset, baseUrl, model: model.trim(), apiKey: apiKey || undefined }
         )
         if (!res.success) {
@@ -118,16 +127,18 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
     }))
 
     const field = 'cp-input w-full px-3 py-2 text-[15px] select-text'
+    const showClaude = claudeInstalled || savedClaudeProvider
 
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className={`grid ${showClaude ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'} gap-2.5`}>
           {(
             [
               ['local', 'llm_local', 'llm_localDesc', <Cpu size={16} key="i" />],
-              ['cloud', 'llm_cloud', 'llm_cloudDesc', <Cloud size={16} key="i" />]
+              ['cloud', 'llm_cloud', 'llm_cloudDesc', <Cloud size={16} key="i" />],
+              ['claude-code', 'llm_claudeCode', 'llm_claudeCodeDesc', <Terminal size={16} key="i" />]
             ] as const
-          ).map(([id, title, desc, icon]) => {
+          ).filter(([id]) => id !== 'claude-code' || showClaude).map(([id, title, desc, icon]) => {
             const active = provider === id
             return (
               <button
@@ -146,6 +157,24 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
           })}
         </div>
 
+        {provider === 'claude-code' && (
+          <div className="space-y-3">
+            <label className="block">
+              <span className="cp-label block mb-1.5">{t('llm_model')}</span>
+              <div className="cp-frame">
+                <select value={claudeModel} onChange={(e) => { setClaudeModel(e.target.value as typeof claudeModel); setNotice(null) }} className={field} style={{ colorScheme: 'dark' }}>
+                  <option value="haiku">Haiku</option>
+                  <option value="sonnet">Sonnet</option>
+                  <option value="opus">Opus</option>
+                </select>
+              </div>
+            </label>
+            <button type="button" onClick={test} disabled={!!busy} className="cp-frame cp-btn-ghost flex items-center gap-1.5 px-3 py-2 text-[13px]">
+              {busy === 'test' && <Loader2 size={13} className="animate-spin" />} {busy === 'test' ? t('llm_testing') : t('llm_test')}
+            </button>
+            {notice && <p role="status" className={notice.ok ? 'text-[var(--cp-cyan)]' : 'text-[var(--cp-yellow)]'}>{notice.text}</p>}
+          </div>
+        )}
         {provider === 'cloud' && (
           <div className="space-y-3">
             <label className="block">

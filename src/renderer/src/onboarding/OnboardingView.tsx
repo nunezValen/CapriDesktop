@@ -64,7 +64,7 @@ export const OnboardingView: React.FC = () => {
       if (p.hasName) setName((typed) => typed || p.name)
     }).catch(() => {})
   }, [])
-  const [provider, setProvider] = useState<'local' | 'cloud'>('local')
+  const [provider, setProvider] = useState<'local' | 'cloud' | 'claude-code'>('local')
   const [status, setStatus] = useState<SetupStatus | null>(null)
   const [running, setRunning] = useState<StepId | null>(null)
   const [failed, setFailed] = useState<Set<StepId>>(new Set())
@@ -72,7 +72,7 @@ export const OnboardingView: React.FC = () => {
   const logRef = useRef<HTMLDivElement>(null)
   const brainRef = useRef<LlmProviderFormHandle>(null)
   const t = useMemo(() => translator(lang), [lang])
-  const order = provider === 'cloud' ? CLOUD_ORDER : LOCAL_ORDER
+  const order = provider !== 'local' ? CLOUD_ORDER : LOCAL_ORDER
 
   useEffect(() => {
     window.api.setup.getStatus().then(setStatus).catch(() => {})
@@ -219,7 +219,7 @@ export const OnboardingView: React.FC = () => {
 
         {page === 3 && (
           <div className="space-y-5">
-            <PageHead index={3} tag={t(PAGE_TAGS[3])} title={t('ob_setupTitle')} sub={provider === 'cloud' ? t('ob_setupSubCloud') : t('ob_setupSub')} />
+            <PageHead index={3} tag={t(PAGE_TAGS[3])} title={t('ob_setupTitle')} sub={provider !== 'local' ? t('ob_setupSubCloud') : t('ob_setupSub')} />
 
             <div className="flex items-center gap-3">
               <span className="cp-label shrink-0">

@@ -1,7 +1,7 @@
 import { scriptPlayer } from '../services/script/script-player'
 import { ensureRequestedLook, requestedLook, splitByLooks, stripLookTags } from '../services/script/look-tags'
 import { isWindows } from '../services/platform'
-import { cloudErrorCode, cloudErrorDetail, isCloudMode, llmFetch, type LlmErrorCode } from '../services/llm-gateway'
+import { cloudErrorCode, cloudErrorDetail, isRemoteMode, llmFetch, type LlmErrorCode } from '../services/llm-gateway'
 import * as os from 'os'
 import { getUserName, personalize, llmBody } from '../services/user-profile'
 import { EventEmitter } from 'events'
@@ -1888,7 +1888,7 @@ LANGUAGE RULE: ${langDirective}`
         return
       } catch (err) {
         // A failing cloud provider must say so instead of quietly answering with the offline fallback
-        if (isCloudMode()) {
+        if (isRemoteMode()) {
           console.warn('[Capri Agent] Cloud turn failed:', cloudErrorDetail(err))
           this.emitAssistant(cloudErrorMessage(cloudErrorCode(err), detectedLang === 'es' || consciousnessService.getPreferredLanguage() === 'es', cloudErrorDetail(err)))
           this.finishSession()

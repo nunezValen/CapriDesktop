@@ -7,13 +7,14 @@
  * The API key is encrypted with the OS keychain (safeStorage) and never reaches the renderer.
  */
 
+import { ClaudeCodeError, runClaudeCode, type ClaudeModel } from './claude-code-runner'
 import { app, safeStorage } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { scriptPath } from './app-paths'
 import { personalize } from './user-profile'
 
-export type LlmProvider = 'local' | 'cloud'
+export type LlmProvider = 'local' | 'cloud' | 'claude-code'
 export type LlmErrorCode = 'auth' | 'quota' | 'model' | 'network' | 'insecure' | 'other'
 
 export interface LlmPublicSettings {
@@ -21,6 +22,7 @@ export interface LlmPublicSettings {
   preset: string
   baseUrl: string
   model: string
+  claudeModel: ClaudeModel
   hasKey: boolean
 }
 
@@ -29,6 +31,7 @@ export interface LlmSettingsUpdate {
   preset?: string
   baseUrl?: string
   model?: string
+  claudeModel?: ClaudeModel
   /** undefined keeps the saved key, '' removes it */
   apiKey?: string
 }
@@ -38,10 +41,11 @@ interface StoredSettings {
   preset: string
   baseUrl: string
   model: string
+  claudeModel: ClaudeModel
   encryptedKey?: string
 }
 
-const DEFAULTS: StoredSettings = { provider: 'local', preset: 'openai', baseUrl: '', model: '' }
+const DEFAULTS: StoredSettings = { provider: 'local', preset: 'openai', baseUrl: '', model: '', claudeModel: 'haiku' }
 
 /** The callers ask for these local models by name; in cloud mode all of them mean the chosen model */
 const LOCAL_MODEL_ALIASES = ['capri:latest', 'qwen2.5-coder:7b', 'qwen2.5-vl:latest', 'llava:latest']
@@ -97,20 +101,21 @@ function keyWouldLeakInClear(baseUrl: string, key: string): boolean {
   return !['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
 }
 
-export function isCloudMode(): boolean {
+export function isRemoteMode(): boolean {
   const s = load()
-  return s.provider === 'cloud' && !!s.baseUrl && !!s.model
+  return s.provider === 'claude-code' || (s.provider === 'cloud' && !!s.baseUrl && !!s.model)
 }
 
 export function getLlmSettings(): LlmPublicSettings {
-  const { provider, preset, baseUrl, model, encryptedKey } = load()
-  return { provider, preset, baseUrl, model, hasKey: !!encryptedKey }
+  const { provider, preset, baseUrl, model, claudeModel, encryptedKey } = load()
+  return { provider, preset, baseUrl, model, claudeModel, hasKey: !!encryptedKey }
 }
 
 export function setLlmSettings(update: LlmSettingsUpdate): { success: boolean; error?: string; settings: LlmPublicSettings } {
   const current = load()
   const next: StoredSettings = { ...current }
-  if (update.provider === 'local' || update.provider === 'cloud') next.provider = update.provider
+  if (update.provider === 'local' || update.provider === 'cloud' || update.provider === 'claude-code') next.provider = update.provider
+  if (update.claudeModel && ['haiku', 'sonnet', 'opus'].includes(update.claudeModel)) next.claudeModel = update.claudeModel
   if (typeof update.preset === 'string') next.preset = update.preset
   if (typeof update.model === 'string') next.model = update.model.trim()
   if (typeof update.baseUrl === 'string') next.baseUrl = normalizeBase(update.baseUrl)
@@ -153,6 +158,7 @@ function authHeaders(key: string): Record<string, string> {
 
 function classify(status: number): LlmErrorCode {
   if (status === 401 || status === 403) return 'auth'
+  if (status === 503 || status === 504) return 'network'
   if (status === 402 || status === 429) return 'quota'
   if (status === 400 || status === 404 || status === 422) return 'model'
   return 'other'
@@ -350,13 +356,24 @@ async function ollamaAnswer(res: Response, stream: boolean, kind: 'chat' | 'gene
 
 /** Drop-in replacement for fetch() on every LLM call */
 export async function llmFetch(input: string, init?: RequestInit): Promise<Response> {
-  if (!isCloudMode()) return fetch(input, init)
+  if (!isRemoteMode()) return fetch(input, init)
 
-  const { baseUrl, model } = load()
+  const { baseUrl, provider, claudeModel } = load()
+  const model = provider === 'claude-code' ? claudeModel : load().model
   const route = new URL(input).pathname
   const key = keyFor(baseUrl)
-  if (keyWouldLeakInClear(baseUrl, key)) return jsonResponse({ error: 'insecure' }, 403)
-  const signal = init?.signal
+  if (provider === 'cloud' && keyWouldLeakInClear(baseUrl, key)) return jsonResponse({ error: 'insecure' }, 403)
+  const post = async (body: Body): Promise<Response> => {
+    if (provider !== 'claude-code') return postChat(baseUrl, key, body, init?.signal)
+    try {
+      return jsonResponse(await runClaudeCode(body, claudeModel, init?.signal))
+    } catch (error) {
+      if (init?.signal?.aborted) throw error
+      const code = cloudErrorCode(error)
+      const status = { auth: 401, quota: 429, model: 400, network: 503, insecure: 403, other: 500 }[code]
+      return jsonResponse({ error: cloudErrorDetail(error), code }, status)
+    }
+  }
   const req: Body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
 
   if (route.endsWith('/api/tags')) {
@@ -366,8 +383,13 @@ export async function llmFetch(input: string, init?: RequestInit): Promise<Respo
     return jsonResponse({ data: [...LOCAL_MODEL_ALIASES, model].map((id) => ({ id })) })
   }
   if (route.endsWith('/chat/completions')) {
-    const body = { ...req, model, messages: normalizeMessages((req.messages || []) as Body[]) }
-    const res = await postChat(baseUrl, key, body, signal)
+    const messages = normalizeMessages((req.messages || []) as Body[])
+    if (provider === 'claude-code' && /^capri/i.test(String(req.model || '')) && !messages.some((m) => m.role === 'system')) {
+      const persona = capriPersona()
+      if (persona) messages.unshift({ role: 'system', content: persona })
+    }
+    const body = { ...req, model, messages }
+    const res = await post(body)
     if (!res.ok) return res
     const data = (await res.json()) as { choices?: { message?: Body }[] }
     const message = data.choices?.[0]?.message
@@ -376,7 +398,7 @@ export async function llmFetch(input: string, init?: RequestInit): Promise<Respo
   }
   if (route.endsWith('/api/chat')) {
     const messages = normalizeMessages(((req.messages || []) as Body[]).map(ollamaMessage))
-    const res = await postChat(baseUrl, key, { ...fromOllama(req, messages), model }, signal)
+    const res = await post({ ...fromOllama(req, messages), model })
     return ollamaAnswer(res, !!req.stream, 'chat')
   }
   if (route.endsWith('/api/generate')) {
@@ -385,7 +407,7 @@ export async function llmFetch(input: string, init?: RequestInit): Promise<Respo
     const messages: Body[] = []
     if (req.system) messages.push({ role: 'system', content: req.system })
     messages.push(ollamaMessage({ role: 'user', content: req.prompt, images: req.images }))
-    const res = await postChat(baseUrl, key, { ...fromOllama(req, messages), model }, signal)
+    const res = await post({ ...fromOllama(req, messages), model })
     return ollamaAnswer(res, !!req.stream, 'generate')
   }
   return fetch(input, init)
@@ -393,6 +415,7 @@ export async function llmFetch(input: string, init?: RequestInit): Promise<Respo
 
 /** Status of the error a cloud request failed with, if the message carries one */
 export function cloudErrorCode(err: unknown): LlmErrorCode {
+  if (err instanceof ClaudeCodeError) return err.code
   const text = String((err as Error)?.message || err)
   const status = Number((text.match(/HTTP (\d{3})/) || [])[1])
   if (status) return classify(status)
@@ -410,4 +433,13 @@ export function cloudErrorDetail(err: unknown): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 160)
+}
+
+export async function testClaudeConnection(model: ClaudeModel): Promise<{ ok: boolean; error?: LlmErrorCode }> {
+  try {
+    await runClaudeCode({ messages: [{ role: 'user', content: 'Reply with: ok' }] }, model)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: cloudErrorCode(error) }
+  }
 }

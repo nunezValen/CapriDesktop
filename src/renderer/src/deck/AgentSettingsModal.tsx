@@ -13,7 +13,7 @@ interface AgentSettingsModalProps {
 export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, onClose }) => {
   const t = useT()
   const { llmModel, ollamaRunning, ollamaModels, setLlmConfig, setOllamaStatus } = useAgentStore()
-  const [provider, setProvider] = useState<'local' | 'cloud'>('local')
+  const [provider, setProvider] = useState<'local' | 'cloud' | 'claude-code'>('local')
   const [modelInput, setModelInput] = useState(llmModel)
   const [isScanning, setIsScanning] = useState(false)
   const formRef = useRef<LlmProviderFormHandle>(null)

@@ -119,15 +119,23 @@ export const CompanionView: React.FC = () => {
   }, [])
   const [isWindowHovered, setIsWindowHovered] = useState(false)
   const [isGamingMode, setIsGamingMode] = useState<boolean>(false)
+  const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState<boolean>(false)
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState<boolean>(false)
+  const isGamingControlHeldRef = useRef(false)
 
   // Gaming Mode: Capri is click-through so she never steals clicks from the game.
   // Hold Ctrl over her to interact / drag her (mouse moves are forwarded even while click-through).
   useEffect(() => {
-    if (!isGamingMode || !window.api?.companion?.setClickThrough) return
-    let ignoring = true
-    window.api.companion.setClickThrough(true).catch(() => {})
+    if (!isGamingMode) {
+      isGamingControlHeldRef.current = false
+      return
+    }
+    if (!window.api?.companion?.setClickThrough) return
+    let ignoring = !(isGamingControlHeldRef.current || isContextMenuOpen || isVoiceSettingsOpen)
+    window.api.companion.setClickThrough(ignoring).catch(() => {})
     const update = (ctrl: boolean) => {
-      const want = !ctrl
+      isGamingControlHeldRef.current = ctrl
+      const want = !(ctrl || isContextMenuOpen || isVoiceSettingsOpen)
       if (want === ignoring) return
       ignoring = want
       window.api.companion.setClickThrough(want).catch(() => {})
@@ -145,9 +153,7 @@ export const CompanionView: React.FC = () => {
       window.removeEventListener('keyup', onKey)
       document.removeEventListener('mouseleave', onLeave)
     }
-  }, [isGamingMode])
-  const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState<boolean>(false)
-  const [isContextMenuOpen, setIsContextMenuOpen] = useState<boolean>(false)
+  }, [isGamingMode, isContextMenuOpen, isVoiceSettingsOpen])
   const tr = useT()
 
   // Language state synchronized with consciousnessService (default 'en')
@@ -1813,11 +1819,100 @@ export const CompanionView: React.FC = () => {
     ? null
     : (activeSpeechText || speech || null)
 
+  const settingsOverlays = (
+    <>
+      {/* Cyberpunk Quick Actions Menu on Right Click */}
+      {isContextMenuOpen && !isDeckOpen && (
+        <div
+          className="cp-vars cp-frame absolute z-50 p-1.5 flex flex-col gap-1 min-w-[230px] animate-fade-in"
+          style={{
+            position: isGamingMode ? 'absolute' : undefined,
+            top: isGamingMode ? '214px' : undefined,
+            bottom: isGamingMode ? undefined : isTabMode ? '140px' : '200px',
+            WebkitAppRegion: 'no-drag'
+          } as React.CSSProperties}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between px-2 py-1 border-b border-stone-800 text-[12px] text-stone-400 font-bold uppercase tracking-wider">
+            <span className="text-cp-500 flex items-center gap-1">
+              <Sliders size={11} /> {tr('cp_menu')}
+            </span>
+            <button
+              onClick={() => setIsContextMenuOpen(false)}
+              className="text-stone-500 hover:text-white cursor-pointer"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setIsContextMenuOpen(false)
+              setIsVoiceSettingsOpen(true)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
+          >
+            <Sliders size={13} className="text-cp-500 shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-bold text-[13px]">{tr('cp_voiceSettings')}</span>
+              <span className="text-[11px] text-stone-500">Fish Audio / Edge-TTS / ElevenLabs</span>
+            </div>
+          </button>
+
+          <button
+            onClick={async () => {
+              setIsContextMenuOpen(false)
+              if (window.api?.deck) await window.api.deck.show()
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
+          >
+            <Code2 size={13} className="text-cp-500 shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-bold text-[13px]">{tr('cp_devMode')}</span>
+              <span className="text-[11px] text-stone-500">{tr('cp_devModeSub')}</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsContextMenuOpen(false)
+              toggleVoiceMute()
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
+          >
+            {isVoiceMuted ? (
+              <>
+                <Volume2 size={13} className="text-cp-500 shrink-0" />
+                <span className="font-bold text-[13px]">{tr('cp_unmute')}</span>
+              </>
+            ) : (
+              <>
+                <VolumeX size={13} className="text-stone-500 shrink-0" />
+                <span className="font-bold text-[13px]">{tr('cp_mute')}</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Voice TTS Settings Modal */}
+      <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <VoiceSettingsModal
+          isOpen={isVoiceSettingsOpen}
+          onClose={() => setIsVoiceSettingsOpen(false)}
+        />
+      </div>
+    </>
+  )
+
   if (isGamingMode) {
     return (
       <div
         onMouseEnter={() => setIsWindowHovered(true)}
         onMouseLeave={() => setIsWindowHovered(false)}
+        onClick={() => {
+          if (isContextMenuOpen) setIsContextMenuOpen(false)
+        }}
         className={`relative w-full h-full flex flex-col items-center justify-start pt-1 select-none overflow-visible font-terminal ${
           isDeckOpen ? 'invisible opacity-0 pointer-events-none' : ''
         }`}
@@ -1948,6 +2043,7 @@ export const CompanionView: React.FC = () => {
             </div>
           </div>
         )}
+        {settingsOverlays}
       </div>
     )
   }
@@ -2315,80 +2411,7 @@ export const CompanionView: React.FC = () => {
         </div>
       </div>
 
-      {/* Cyberpunk Quick Actions Menu on Right Click */}
-      {isContextMenuOpen && !isDeckOpen && (
-        <div
-          className="cp-vars cp-frame absolute z-50 p-1.5 flex flex-col gap-1 min-w-[230px] animate-fade-in"
-          style={{ bottom: isTabMode ? '140px' : '200px', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between px-2 py-1 border-b border-stone-800 text-[12px] text-stone-400 font-bold uppercase tracking-wider">
-            <span className="text-cp-500 flex items-center gap-1">
-              <Sliders size={11} /> {tr('cp_menu')}
-            </span>
-            <button
-              onClick={() => setIsContextMenuOpen(false)}
-              className="text-stone-500 hover:text-white cursor-pointer"
-            >
-              <X size={12} />
-            </button>
-          </div>
-
-          <button
-            onClick={() => {
-              setIsContextMenuOpen(false)
-              setIsVoiceSettingsOpen(true)
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
-          >
-            <Sliders size={13} className="text-cp-500 shrink-0" />
-            <div className="flex flex-col">
-              <span className="font-bold text-[13px]">{tr('cp_voiceSettings')}</span>
-              <span className="text-[11px] text-stone-500">Fish Audio / Edge-TTS / ElevenLabs</span>
-            </div>
-          </button>
-
-          <button
-            onClick={async () => {
-              setIsContextMenuOpen(false)
-              if (window.api?.deck) await window.api.deck.show()
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
-          >
-            <Code2 size={13} className="text-cp-500 shrink-0" />
-            <div className="flex flex-col">
-              <span className="font-bold text-[13px]">{tr('cp_devMode')}</span>
-              <span className="text-[11px] text-stone-500">{tr('cp_devModeSub')}</span>
-            </div>
-          </button>
-
-          <button
-            onClick={() => {
-              setIsContextMenuOpen(false)
-              toggleVoiceMute()
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
-          >
-            {isVoiceMuted ? (
-              <>
-                <Volume2 size={13} className="text-cp-500 shrink-0" />
-                <span className="font-bold text-[13px]">{tr('cp_unmute')}</span>
-              </>
-            ) : (
-              <>
-                <VolumeX size={13} className="text-stone-500 shrink-0" />
-                <span className="font-bold text-[13px]">{tr('cp_mute')}</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* Voice TTS Settings Modal */}
-      <VoiceSettingsModal
-        isOpen={isVoiceSettingsOpen}
-        onClose={() => setIsVoiceSettingsOpen(false)}
-      />
+      {settingsOverlays}
     </div>
   )
 }

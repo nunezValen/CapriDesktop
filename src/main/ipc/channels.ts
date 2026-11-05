@@ -71,6 +71,8 @@ export const IPC_CHANNELS = {
   LLM_GET_SETTINGS: 'llm:getSettings',
   LLM_SET_SETTINGS: 'llm:setSettings',
   LLM_LIST_MODELS: 'llm:listModels',
+  LLM_CLAUDE_INSTALLED: 'llm:claudeInstalled',
+  LLM_TEST_CLAUDE: 'llm:testClaude',
   LLM_TEST: 'llm:test',
 
   // Terminal & System

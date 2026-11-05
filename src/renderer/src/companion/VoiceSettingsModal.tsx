@@ -260,9 +260,9 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
   return (
     <div className="cp-vars fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4 select-none text-[14px]">
       {/* Outer Cyber Frame */}
-      <div className="cp-frame w-full max-w-2xl flex flex-col overflow-hidden animate-fade-in" style={{ ['--c' as string]: '14px' }}>
+      <div className="cp-frame w-full max-w-2xl max-h-full flex flex-col overflow-hidden animate-fade-in" style={{ ['--c' as string]: '14px' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-black/90 border-b border-[#ff5f57]/30">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 bg-black/90 border-b border-[#ff5f57]/30">
           <div className="flex items-center gap-2.5 text-[#ff5f57] font-bold tracking-wider">
             <Volume2 size={18} className="text-[#ff5f57] animate-pulse" />
             <span className="cp-title text-[18px]">{t('vs_title')}</span>
@@ -277,7 +277,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
         </div>
 
         {/* Modal Content */}
-        <div className="p-5 space-y-5 max-h-[78vh] overflow-y-auto">
+        <div className="min-h-0 p-5 space-y-5 overflow-y-auto">
           {/* Provider Tabs */}
           <div>
             <label className="text-stone-300 font-bold tracking-wide block mb-2 flex items-center gap-2">
@@ -737,7 +737,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-black/90 border-t border-[#ff5f57]/30">
+        <div className="shrink-0 flex items-center justify-between px-5 py-3.5 bg-black/90 border-t border-[#ff5f57]/30">
           <button
             type="button"
             onClick={handleResetDefaults}

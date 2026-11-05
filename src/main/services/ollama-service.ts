@@ -1,4 +1,4 @@
-import { isCloudMode, llmFetch } from './llm-gateway'
+import { isRemoteMode, llmFetch } from './llm-gateway'
 import { toolsDir } from './app-paths'
 import { findOnPath, isLinux, killProcesses } from './platform'
 import { spawn } from 'child_process'
@@ -50,7 +50,7 @@ export class OllamaService {
       this.idleTimer = null
     }
     // With a cloud model Capri never started Ollama: an instance running here belongs to the user
-    if (isCloudMode()) return true
+    if (isRemoteMode()) return true
 
     this.isStarting = false
     this.cachedModels = []
@@ -69,7 +69,7 @@ export class OllamaService {
    */
   public async queryTags(): Promise<OllamaStatus> {
     try {
-      if (isCloudMode()) {
+      if (isRemoteMode()) {
         const res = await llmFetch('http://127.0.0.1:11434/api/tags')
         const data = (await res.json()) as { models?: { name: string }[] }
         return { running: true, models: (data.models || []).map((m) => m.name) }

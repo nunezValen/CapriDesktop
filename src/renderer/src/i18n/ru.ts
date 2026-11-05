@@ -172,6 +172,8 @@ export const ru: Messages = {
   llm_title: 'Капри // Мозг',
   llm_local: 'На этом ПК',
   llm_localDesc: 'Бесплатно и приватно, через Ollama. Нужен мощный ПК и около 6 ГБ.',
+  llm_claudeCode: 'Claude Code',
+  llm_claudeCodeDesc: 'Использует подключение Claude CLI без дополнительного API-ключа. Haiku — самый быстрый вариант.',
   llm_cloud: 'Облачная модель (API)',
   llm_cloudDesc: 'Любой провайдер, совместимый с OpenAI. Нужен API-ключ, оплата по использованию.',
   llm_provider: 'Провайдер',

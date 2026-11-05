@@ -16,7 +16,7 @@ import { localFfmpegPath, pythonEnvDir, scriptPath, toolsDir, venvPython } from 
 import { findOnPath, isWindows, linuxInstallCommand, linuxPackageManager } from './platform'
 import { ollamaService } from './ollama-service'
 import { consciousnessService } from './consciousness-service'
-import { isCloudMode } from './llm-gateway'
+import { isRemoteMode } from './llm-gateway'
 import { windowManager } from '../windows/window-manager'
 import { localizeLine } from '../../shared/lines'
 import { getUserName } from './user-profile'
@@ -150,7 +150,7 @@ export class SetupService {
     const missing: SetupStep[] = []
     if (!s.python.envReady) missing.push('python')
     if (!s.ffmpeg) missing.push('ffmpeg')
-    if (!isCloudMode()) {
+    if (!isRemoteMode()) {
       if (!s.ollama.installed) missing.push('ollama')
       else if (s.ollama.running && s.ollama.models.length === 0) missing.push('model')
     }
