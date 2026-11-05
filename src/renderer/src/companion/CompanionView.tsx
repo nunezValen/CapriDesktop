@@ -2037,7 +2037,7 @@ export const CompanionView: React.FC = () => {
         isDeckOpen ? 'invisible opacity-0 pointer-events-none' : ''
       }`}
       style={{
-        WebkitAppRegion: 'drag',
+        WebkitAppRegion: 'no-drag',
         background: 'transparent'
       } as React.CSSProperties}
     >
