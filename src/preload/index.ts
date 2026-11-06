@@ -8,6 +8,7 @@ import {
   RoamingStatusPayload,
   AgentMode,
   AgentConfigPayload,
+  SystemPromptPayload,
   ScannerBounds,
   ScannerStatusPayload,
   ScannerScanResult,
@@ -236,6 +237,14 @@ const api = {
 
     detectOllama: (): Promise<{ running: boolean; models: string[] }> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_DETECT_OLLAMA),
+
+    // Editable system prompt
+    getSystemPrompt: (): Promise<SystemPromptPayload> => ipcRenderer.invoke(IPC_CHANNELS.AGENT_GET_SYSTEM_PROMPT),
+
+    setSystemPrompt: (text: string): Promise<SystemPromptPayload> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_SYSTEM_PROMPT, text),
+
+    resetSystemPrompt: (): Promise<SystemPromptPayload> => ipcRenderer.invoke(IPC_CHANNELS.AGENT_RESET_SYSTEM_PROMPT),
 
     getLlmSettings: (): Promise<LlmPublicSettings> => ipcRenderer.invoke(IPC_CHANNELS.LLM_GET_SETTINGS),
 

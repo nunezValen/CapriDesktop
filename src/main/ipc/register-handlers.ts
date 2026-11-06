@@ -24,6 +24,7 @@ import { cyberpunkAdapter } from '../services/game'
 import { CYBERPUNK_GIGS, getNextGig } from '../services/game/adapters/cyberpunk/gigs'
 import { clipService } from '../services/clip-service'
 import { welcomeSpeech } from '../services/welcome-speech'
+import { getSystemPromptInfo, setSystemPrompt, resetSystemPrompt } from '../services/system-prompt-store'
 
 export function registerIpcHandlers(): void {
   // Deck window visibility
@@ -317,6 +318,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.AGENT_SET_CONFIG, (_event, config) => {
     return agentManager.setConfig(config)
   })
+
+  // read, save and reset Capri's editable system prompt
+  ipcMain.handle(IPC_CHANNELS.AGENT_GET_SYSTEM_PROMPT, () => getSystemPromptInfo())
+  ipcMain.handle(IPC_CHANNELS.AGENT_SET_SYSTEM_PROMPT, (_event, text: string) => setSystemPrompt(text))
+  ipcMain.handle(IPC_CHANNELS.AGENT_RESET_SYSTEM_PROMPT, () => resetSystemPrompt())
 
   ipcMain.handle(IPC_CHANNELS.LLM_GET_SETTINGS, () => getLlmSettings())
   ipcMain.handle(IPC_CHANNELS.LLM_SET_SETTINGS, (_event, update: LlmSettingsUpdate) => setLlmSettings(update))

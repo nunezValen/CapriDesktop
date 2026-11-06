@@ -332,7 +332,14 @@ export const en = {
   vs_stDone: 'Test finished.',
   vs_stPlayError: 'Could not play the test audio.',
   vs_stSynthError: 'Synthesis failed: {error}',
-  vs_stReset: 'Values restored to Capri defaults.'
+  vs_stReset: 'Values restored to Capri defaults.',
+  // System prompt editor (Capri // Brain settings)
+  sp_title: 'System prompt (personality)',
+  sp_hint: 'This is who Capri is. Write {name} where her name for you should go. Her tool, voice and look rules are always added after this text, and the change applies from your next message.',
+  sp_custom: 'Custom',
+  sp_default: 'Default',
+  sp_reset: 'Restore default',
+  sp_chars: '{n} characters'
 }
 
 export type Messages = typeof en
