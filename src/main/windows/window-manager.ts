@@ -348,11 +348,7 @@ export class WindowManager {
       let x = workArea.x + workArea.width - width - 25
       let y = workArea.y + 40
 
-      if (sittingPose === 'front') {
-        // En el medio de la pantalla (Screen Center: horizontal & vertical)
-        x = workArea.x + Math.round((workArea.width - width) / 2)
-        y = workArea.y + Math.round((workArea.height - height) / 2)
-      } else if (windowRect) {
+      if (sittingPose === 'perch' && windowRect) {
         // Horizontal: Top-right corner of the target window (offset slightly to the left of window control buttons)
         const targetRight = windowRect.left + windowRect.width
         const idealX = targetRight - 320
@@ -370,7 +366,6 @@ export class WindowManager {
       this.companionWin.show()
 
       this.broadcast(IPC_CHANNELS.COMPANION_SET_TAB_MODE, true)
-      // Broadcast appropriate sitting state: 'idle_front' for center pose, 'idle' for tab perch
       const targetState = sittingPose === 'front' ? 'idle_front' : 'idle'
       this.broadcast(IPC_CHANNELS.COMPANION_STATE_CHANGED, targetState)
       return true
@@ -411,10 +406,7 @@ export class WindowManager {
     let x = workArea.x + workArea.width - width - 25
     let y = workArea.y + 40
 
-    if (sittingPose === 'front') {
-      x = workArea.x + Math.round((workArea.width - width) / 2)
-      y = workArea.y + Math.round((workArea.height - height) / 2)
-    } else {
+    if (sittingPose === 'perch') {
       const targetRight = windowRect.left + windowRect.width
       const idealX = targetRight - 320
       const minX = workArea.x + 10

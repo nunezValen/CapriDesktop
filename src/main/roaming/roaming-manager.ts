@@ -241,7 +241,6 @@ export class RoamingManager {
         this.loopTimer = null
       }
 
-      // User requirement: 50% probability of sitting in front pose (center of screen) or perch pose (on window tab)
       this.currentSittingPose = Math.random() < 0.5 ? 'front' : 'perch'
 
       this.findWindowedApp().then((app) => {
@@ -307,7 +306,6 @@ export class RoamingManager {
     this.currentBehavior = 'tab'
     this.isTabMode = true
 
-    // 50% probability between front-facing (center screen) and perch (tab corner)
     this.currentSittingPose = Math.random() < 0.5 ? 'front' : 'perch'
 
     const app = await this.findWindowedApp()
@@ -378,7 +376,6 @@ export class RoamingManager {
     this.stopTabTracking()
 
     if (this.currentSittingPose === 'front') {
-      // Front sitting pose stays stable in the middle of the screen
       return
     }
 

@@ -1396,7 +1396,6 @@ export const CompanionView: React.FC = () => {
       return 'curious'
     }
 
-    // Tab Mode: Capri is perched sitting on window tab or sitting front in center -> 'idle_front' or 'idle'
     if (isTabMode) return emotion === 'idle_front' ? 'idle_front' : 'idle'
 
     // Closed or sleep
@@ -1425,8 +1424,8 @@ export const CompanionView: React.FC = () => {
     if (isDesktopChatOpen) return tr('st_listening')
     switch (desktopCompanionState) {
       case 'walking': return tr('st_walking')
-      case 'idle': return tr('st_sitting')
-      case 'idle_front': return tr('st_sittingCenter')
+      case 'idle':
+      case 'idle_front': return tr('st_sitting')
       case 'standing': return tr('st_standing')
       case 'talking': return tr('st_talking')
       case 'curious': return tr('st_curious')
