@@ -26,7 +26,7 @@ export function createCompanionWindow(): BrowserWindow {
     alwaysOnTop: true,
     resizable: false,
     hasShadow: false,
-    skipTaskbar: false,
+    skipTaskbar: true,
     webPreferences: {
       preload: preloadPath,
       sandbox: false,

@@ -4,6 +4,7 @@ import { DEFAULT_HOTKEYS, hotkeyProblem, type HotkeyAction, type HotkeyProblem, 
 import { createCompanionWindow } from './companion-window'
 import { createDeckWindow } from './deck-window'
 import { createScannerWindow } from './scanner-window'
+import { createTray, destroyTray } from './tray'
 import { IPC_CHANNELS, ScannerBounds } from '../ipc/channels'
 import { roamingManager } from '../roaming/roaming-manager'
 import { ollamaService } from '../services/ollama-service'
@@ -76,6 +77,7 @@ export class WindowManager {
   public init(): void {
     this.companionWin = createCompanionWindow()
     this.deckWin = createDeckWindow()
+    createTray(this)
     // If that monitor isn't connected now she stays on the main one, and it's kept for when it's back
     const savedDisplay = consciousnessService.getCompanionDisplayId()
     if (savedDisplay !== null) this.moveCompanionToDisplay(savedDisplay, false)
@@ -691,6 +693,7 @@ export class WindowManager {
 
   public quitApp(): void {
     ;(app as unknown as { isQuitting?: boolean }).isQuitting = true
+    destroyTray()
     try {
       globalShortcut.unregisterAll()
     } catch {}

@@ -827,5 +827,8 @@
  "I couldn't open {0}, choomba. Ask me again whenever you want and show me where it is.",
  "[happy] Okay, I'm staying right here. [playful] I won't move until you move me.",
  "[excited] Free again! Back to wandering around, choomba.",
- "[happy] I'm on version {0}, choomba."
+ "[happy] I'm on version {0}, choomba.",
+ "Show Capri",
+ "Dev Deck",
+ "Quit"
 ]
