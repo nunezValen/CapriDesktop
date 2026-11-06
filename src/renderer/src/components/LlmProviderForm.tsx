@@ -1,3 +1,4 @@
+import type { CloudRequestStatus } from '../../../main/services/cloud-request-status'
 import React, { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import { Check, Cloud, Cpu, Key, List, Loader2, Server, ShieldAlert, X } from 'lucide-react'
 import { MessageKey } from '../i18n'
@@ -41,8 +42,10 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
     const [preset, setPreset] = useState('openai')
     const [baseUrl, setBaseUrl] = useState(PRESETS[0].baseUrl)
     const [model, setModel] = useState('')
+    const [visionModel,setVisionModel]=useState('')
     const [apiKey, setApiKey] = useState('')
     const [hasKey, setHasKey] = useState(false)
+    const [lastRequest,setLastRequest]=useState<CloudRequestStatus|null>(null)
     const [models, setModels] = useState<string[]>([])
     const [busy, setBusy] = useState<'models' | 'test' | null>(null)
     const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -54,7 +57,9 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
         if (s.preset) setPreset(s.preset)
         if (s.baseUrl) setBaseUrl(s.baseUrl)
         setModel(s.model)
+        setVisionModel(s.visionModel || '')
         setHasKey(s.hasKey)
+        setLastRequest(s.lastRequest || null)
         onProviderChange?.(s.provider)
       })
     }, [])
@@ -105,7 +110,7 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
         const res = await window.api.agent.setLlmSettings(
           provider === 'local'
             ? { provider: 'local' }
-            : { provider: 'cloud', preset, baseUrl, model: model.trim(), apiKey: apiKey || undefined }
+            : { provider: 'cloud', preset, baseUrl, model: model.trim(), visionModel:visionModel.trim(), apiKey: apiKey || undefined }
         )
         if (!res.success) {
           fail(res.error)
@@ -227,6 +232,11 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
               </div>
             </div>
 
+            <label className="block text-sm">Vision model
+              <input aria-label="Cloud vision model" className={`${field} cp-mono mt-1`} value={visionModel} onChange={e=>setVisionModel(e.target.value)} placeholder="Image-capable model ID" />
+              <span className="block text-xs mt-1">Uses this cloud server and API key. Manual scans send the selected screen image. Live Scan and automatic screen comments send images only after you enable them. Chat keeps its own model.</span>
+            </label>
+
             <div className="flex items-center gap-3">
               <button type="button" onClick={test} disabled={!!busy} className="cp-frame cp-btn-ghost flex items-center gap-1.5 px-3 py-2 text-[13px] shrink-0">
                 {busy === 'test' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {busy === 'test' ? t('llm_testing') : t('llm_test')}
@@ -236,6 +246,11 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
                   {notice.ok ? <Check size={14} className="mt-0.5 shrink-0" /> : <X size={14} className="mt-0.5 shrink-0" />} {notice.text}
                 </span>
               )}
+            </div>
+
+            <div className="text-xs space-y-1 select-text" role="status">
+              <p>{lastRequest ? `Last cloud request: ${lastRequest.host} · ${lastRequest.model} · ${lastRequest.state}${lastRequest.httpStatus ? ` · HTTP ${lastRequest.httpStatus}` : ''}${lastRequest.elapsedMs !== undefined ? ` · ${lastRequest.elapsedMs} ms` : ''} · ${new Date(lastRequest.startedAt).toLocaleTimeString()}` : 'No cloud request recorded yet.'}</p>
+              <button type="button" className="cp-btn-ghost px-2 py-1" onClick={async()=>setLastRequest((await window.api.agent.getLlmSettings()).lastRequest || null)}>Refresh request status</button>
             </div>
 
             <div className="cp-frame is-warn flex gap-2 px-3 py-2.5 text-[13px] leading-snug text-[var(--cp-text)]">

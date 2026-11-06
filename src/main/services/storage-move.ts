@@ -9,7 +9,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { hasOllamaModels, ollamaModelsDir, storageDir } from './storage-location'
-import { pythonEnvDir, toolsDir } from './app-paths'
+import { speechModelsDir, pythonEnvDir, toolsDir } from './app-paths'
 
 export type MoveKind = 'models' | 'whisper' | 'voiceEnv' | 'tools'
 
@@ -128,12 +128,20 @@ export async function planMove(root: string | null, ollamaProgram: { from: strin
 
   const defaultModels = path.join(home, '.ollama', 'models')
   const modelsNow = ollamaModelsDir() || process.env.OLLAMA_MODELS || defaultModels
-  if (hasOllamaModels(modelsNow)) await add('models', modelsNow, inRoot('ollama-models', defaultModels))
+  const managedModels=storageDir('ollama-models')
+  // A standalone Mac Ollama library belongs to that app; moving it would break its next launch.
+  const mayMoveModels=process.platform!=='darwin' || (!!managedModels && samePath(modelsNow,managedModels))
+  if (mayMoveModels && hasOllamaModels(modelsNow)) await add('models', modelsNow, inRoot('ollama-models', defaultModels))
 
+  if(process.platform==='darwin') {
+    await add('whisper',speechModelsDir(),inRoot('whisper',path.join(userData,'speech-models')))
+  } else {
   const defaultHf = process.env.HF_HOME || path.join(home, '.cache', 'huggingface')
   const hfNow = storageDir('whisper') || defaultHf
   const hfNext = inRoot('whisper', defaultHf)
   for (const name of whisperModels(hfNow)) await add('whisper', path.join(hfNow, 'hub', name), path.join(hfNext, 'hub', name))
+
+  }
 
   await add('voiceEnv', pythonEnvDir(), inRoot('python-env', path.join(userData, 'python-env')))
   await add('tools', toolsDir(), inRoot('tools', path.join(userData, 'tools')))

@@ -660,6 +660,20 @@ async def synthesize_speech(text: str, out_path: str, lang_override: str = None)
 
     print(json.dumps({"success": True, "path": out_path, "voice": voice, "provider": "edge-tts", "fallback": is_fallback}))
 
+def speech_model_name():
+    explicit = os.environ.get("CAPRI_WHISPER_MODEL", "").strip()
+    if explicit:
+        return explicit
+    if sys.platform == "darwin":
+        try:
+            with open(os.path.join(VOICE_DIR, "speech-recognition.json"), encoding="utf-8") as f:
+                selected = json.load(f).get("model")
+            if selected in ("base", "small"):
+                return selected
+        except (OSError, ValueError):
+            pass
+    return "base" if sys.platform == "darwin" else "small"
+
 _whisper_model = None
 
 def get_whisper_model():
@@ -668,28 +682,27 @@ def get_whisper_model():
         try:
             from faster_whisper import WhisperModel
             import ctranslate2  # ships with faster-whisper; avoids pulling in PyTorch just to detect the GPU
-            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+            device = "cpu" if sys.platform == "darwin" else ("cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu")
             compute_type = "float16" if device == "cuda" else "int8"
             # "small" understands accented English and mixed ES/EN far better than "base".
             # Override with CAPRI_WHISPER_MODEL (e.g. "medium", "large-v3-turbo") if VRAM allows.
-            model_name = os.environ.get("CAPRI_WHISPER_MODEL", "").strip() or "small"
-            model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            model_name = speech_model_name()
+            model = WhisperModel(model_name, device=device, compute_type=compute_type, download_root=os.environ.get("CAPRI_WHISPER_DIR"), local_files_only=sys.platform == "darwin" and os.environ.get("CAPRI_ALLOW_MODEL_DOWNLOAD") != "1")
             if device == "cuda":
-                # The model loads fine without NVIDIA's libraries and only fails when it first works.
-                # After that failure the same model hangs forever, so it's tried once, right here.
                 import numpy
                 model.detect_language(numpy.zeros(16000, dtype=numpy.float32))
             _whisper_model = model
-        except Exception as gpu_err:
-            sys.stderr.write(f"[STT] Using the CPU: {gpu_err}\n")
+        except Exception as error:
+            if sys.platform == "darwin":
+                raise RuntimeError("Speech model unavailable. Open Mac settings and choose Set up voice recognition.") from error
             _whisper_model = cpu_whisper_model()
     return _whisper_model
 
 def cpu_whisper_model():
     """Same model on the CPU: used when CUDA/cuBLAS is not available on this machine."""
     from faster_whisper import WhisperModel
-    model_name = os.environ.get("CAPRI_WHISPER_MODEL", "").strip() or "small"
-    return WhisperModel(model_name, device="cpu", compute_type="int8")
+    model_name = speech_model_name()
+    return WhisperModel(model_name, device="cpu", compute_type="int8", download_root=os.environ.get("CAPRI_WHISPER_DIR"), local_files_only=sys.platform == "darwin" and os.environ.get("CAPRI_ALLOW_MODEL_DOWNLOAD") != "1")
 
 # Names Whisper would otherwise mishear. The prompt also pulls it towards its own language, so the
 # Spanish and English phrases only go to those two.
@@ -764,7 +777,7 @@ def transcribe_audio_internal(input_file: str, language: str = None, hint: str =
             segs, inf = m.transcribe(
                 audio_file,
                 language=lang_arg,
-                initial_prompt=whisper_prompt(lang_arg),
+                initial_prompt="Hey Capri. Open Spotify. What is on my screen?" if sys.platform == "darwin" else whisper_prompt(lang_arg),
                 beam_size=5,
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=250)
@@ -780,7 +793,7 @@ def transcribe_audio_internal(input_file: str, language: str = None, hint: str =
             global _whisper_model
             _whisper_model = cpu_whisper_model()
             raw_text, info = run(_whisper_model)
-        full_text = clean_cyberpunk_transcription(raw_text)
+        full_text = raw_text.strip() if sys.platform == "darwin" else clean_cyberpunk_transcription(raw_text)
 
         if full_text:
             return {"success": True, "text": full_text, "language": info.language}
@@ -849,6 +862,7 @@ def main():
 
     # STT Worker (persistent local process)
     subparsers.add_parser("stt-worker")
+    subparsers.add_parser("prepare-whisper")
 
     args = parser.parse_args()
 
@@ -856,6 +870,10 @@ def main():
         asyncio.run(synthesize_speech(args.text, args.out, getattr(args, 'lang', None)))
     elif args.command == "stt":
         transcribe_audio(args.file, getattr(args, 'lang', None))
+    elif args.command == "prepare-whisper":
+        os.environ["CAPRI_ALLOW_MODEL_DOWNLOAD"] = "1"
+        get_whisper_model()
+        print(json.dumps({"ready": True}), flush=True)
     elif args.command == "stt-worker":
         run_stt_worker()
     else:

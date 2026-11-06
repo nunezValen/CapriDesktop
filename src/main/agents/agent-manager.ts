@@ -86,6 +86,7 @@ export class AgentManager extends EventEmitter {
     switch (event.type) {
       case 'session.started':
         this.isRunning = true
+        if (process.platform === 'darwin') this.setCompanionState('thinking')
         break
 
       case 'tool.started':

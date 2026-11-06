@@ -1,7 +1,8 @@
+import { localAIEnabled } from './local-ai-policy'
 import { ollamaModelsDir, programDirs } from './storage-location'
 import { isCloudMode, llmFetch } from './llm-gateway'
 import { toolsDir } from './app-paths'
-import { findOnPath, isLinux, isWindows, killProcesses } from './platform'
+import { findOnPath, isMac, isLinux, isWindows, killProcesses } from './platform'
 import { spawn } from './hidden-process'
 import type { ChildProcess } from 'child_process'
 import fs from 'fs'
@@ -16,6 +17,7 @@ export interface OllamaStatus {
 export class OllamaService {
   private static instance: OllamaService
   private isStarting = false
+  private ownedProcess: ReturnType<typeof spawn> | null = null
   private serving: { child: ChildProcess; modelsDir: string | undefined } | null = null
   private cachedModels: string[] = []
   private idleTimer: NodeJS.Timeout | null = null
@@ -58,13 +60,14 @@ export class OllamaService {
       this.idleTimer = null
     }
     // With a cloud model Capri never started Ollama: an instance running here belongs to the user
-    if (isCloudMode()) return true
+    if (isCloudMode() && !this.ownedProcess) return true
 
     this.isStarting = false
     this.cachedModels = []
 
     try {
-      killProcesses(['ollama', 'ollama app'])
+      if (isMac) { this.ownedProcess?.kill('SIGTERM'); this.ownedProcess = null }
+      else killProcesses(['ollama', 'ollama app'])
       return true
     } catch (e) {
       console.warn('[OllamaService] Error stopping Ollama:', e)
@@ -75,9 +78,9 @@ export class OllamaService {
   /**
    * Quick check if Ollama is currently reachable on localhost:11434
    */
-  public async queryTags(): Promise<OllamaStatus> {
+  public async queryTags(forceLocal = false): Promise<OllamaStatus> {
     try {
-      if (isCloudMode()) {
+      if (isCloudMode() && !forceLocal) {
         const res = await llmFetch('http://127.0.0.1:11434/api/tags')
         const data = (await res.json()) as { models?: { name: string }[] }
         return { running: true, models: (data.models || []).map((m) => m.name) }
@@ -105,6 +108,7 @@ export class OllamaService {
    * Finds the path to the ollama binary
    */
   public findOllamaBinary(): string | null {
+    if (isMac) return findOnPath('ollama')
     if (isLinux) {
       const own = path.join(toolsDir(), 'ollama', 'bin', 'ollama')
       return fs.existsSync(own) ? own : findOnPath('ollama')
@@ -141,10 +145,11 @@ export class OllamaService {
    * Ensures Ollama is running. If not running, launches it in the background
    * with OLLAMA_MODELS pointing to D:\ollama_models (or user's env).
    */
-  public async ensureRunning(): Promise<OllamaStatus> {
+  public async ensureRunning(forceLocal = false): Promise<OllamaStatus> {
+    if (isMac && !localAIEnabled() && (forceLocal || !isCloudMode())) return {running:false,models:[]}
     this.touchActivity()
     // Check if already running
-    const initial = await this.queryTags()
+    const initial = await this.queryTags(forceLocal)
     if (initial.running) {
       return initial
     }
@@ -152,7 +157,7 @@ export class OllamaService {
     if (this.isStarting) {
       // Already attempting start, wait a moment and re-query
       await new Promise((r) => setTimeout(r, 2000))
-      return await this.queryTags()
+      return await this.queryTags(forceLocal)
     }
 
     this.isStarting = true
@@ -173,9 +178,9 @@ export class OllamaService {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         ...(modelsDir ? { OLLAMA_MODELS: modelsDir } : {}),
-        OLLAMA_KEEP_ALIVE: '24h',
+        OLLAMA_KEEP_ALIVE: isMac ? '2m' : '24h',
         // Ollama's default of 4096 cuts her instructions, and she forgets who she is
-        OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '8192'
+        OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || (isMac ? '2048' : '8192')
       }
 
       // Never detached on Windows: that leaves it with no console at all, even with windowsHide, so
@@ -188,6 +193,8 @@ export class OllamaService {
         env
       })
 
+      child.on('error', err => console.warn('[Ollama] Start failed:', err.message))
+      if (isMac) this.ownedProcess = child
       child.unref()
       const serving = { child, modelsDir }
       this.serving = serving
@@ -198,7 +205,7 @@ export class OllamaService {
       // Poll until alive (up to 6 seconds)
       for (let attempt = 1; attempt <= 12; attempt++) {
         await new Promise((r) => setTimeout(r, 500))
-        const status = await this.queryTags()
+        const status = await this.queryTags(forceLocal)
         if (status.running) {
           console.log(
             `[OllamaService] Ollama is online! Available models: ${status.models.join(', ')}`

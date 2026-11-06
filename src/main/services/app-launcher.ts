@@ -1,10 +1,11 @@
+import { launchMacApp, macAppName } from './mac-desktop'
 /**
  * Finds and starts any installed app by name: a location the user already showed her, the Start menu
  * (Microsoft Store apps included), shortcuts, and on Windows what's registered as installed even with
  * no shortcut; on Linux, .desktop entries. If she can't find it, she asks the user where it is.
  */
 
-import { dialog, shell } from 'electron'
+import { app, dialog, shell } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -12,7 +13,7 @@ import { localizeLine } from '../../shared/lines'
 import { appKey, bestAppMatch, looksLikeAppName } from './app-finder'
 import { consciousnessService } from './consciousness-service'
 import { exec, spawn } from './hidden-process'
-import { findOnPath, isWindows, launchDesktopEntry, listDesktopEntries, type DesktopEntry } from './platform'
+import { findOnPath, isMac, isWindows, launchDesktopEntry, listDesktopEntries, type DesktopEntry } from './platform'
 import { speak, speechLang } from './update-service'
 
 interface InstalledApp {
@@ -96,6 +97,7 @@ function openWindowsAppId(appId: string): void {
 /** Starts a file: an executable, or whatever the system opens that kind of file with */
 async function startFile(file: string): Promise<boolean> {
   if (!fs.existsSync(file)) return false
+  if (isMac) return (await shell.openPath(file)) === ''
   if (!isWindows && !file.endsWith('.desktop')) {
     try {
       fs.accessSync(file, fs.constants.X_OK)
@@ -134,6 +136,21 @@ export async function openInstalledApp(request: string): Promise<string | null> 
     return found.file && (await startFile(found.file)) ? found.name : null
   }
 
+  if(isMac) {
+    const bundles:InstalledApp[]=[]
+    const scan=(dir:string,depth=0)=>{
+      if(depth>2) return
+      try {for(const item of fs.readdirSync(dir,{withFileTypes:true})) {
+        if(!item.isDirectory()) continue
+        const full=path.join(dir,item.name)
+        if(item.name.endsWith('.app')) bundles.push({name:item.name.slice(0,-4),file:full})
+        else scan(full,depth+1)
+      }} catch {}
+    }
+    for(const dir of ['/Applications','/System/Applications',path.join(os.homedir(),'Applications')]) scan(dir)
+    const match=bestAppMatch(macAppName(request),bundles)
+    return match?.file && await launchMacApp(match.file) ? match.name : null
+  }
   const entry = bestAppMatch<DesktopEntry>(request, listDesktopEntries())
   if (entry) return launchDesktopEntry(entry) ? entry.name : null
   const onPath = /^[\w.+-]+$/.test(request) ? findOnPath(request.toLowerCase()) || findOnPath(request) : null
@@ -154,7 +171,7 @@ export async function askWhereAppIs(request: string): Promise<string | null> {
   )
   const picked = await dialog.showOpenDialog({
     title: localizeLine(lang === 'es' ? `¿Dónde está ${request}?` : `Where is ${request}?`, lang),
-    defaultPath: isWindows ? process.env.ProgramFiles || 'C:\\' : os.homedir(),
+    defaultPath: isMac ? '/Applications' : isWindows ? process.env.ProgramFiles || 'C:\\' : os.homedir(),
     properties: ['openFile'],
     filters: isWindows ? [{ name: 'Apps', extensions: ['exe', 'lnk', 'url', 'bat', 'cmd'] }] : []
   })
@@ -166,6 +183,7 @@ export async function askWhereAppIs(request: string): Promise<string | null> {
 
 /** Whether something on this PC answers a link like steam:// . Starting one that doesn't shows an error window */
 export function protocolIsRegistered(protocol: string): Promise<boolean> {
+  if(isMac) {try {return Promise.resolve(!!app.getApplicationNameForProtocol(`${protocol}:`))} catch {return Promise.resolve(false)}}
   return new Promise((resolve) => {
     const command = isWindows ? `reg query "HKCR\\${protocol}" /ve` : `xdg-mime query default x-scheme-handler/${protocol}`
     exec(command, { timeout: 5000 }, (err, stdout) => resolve(!err && (isWindows || !!String(stdout).trim())))

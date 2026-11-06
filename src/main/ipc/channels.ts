@@ -1,6 +1,22 @@
 export const IPC_CHANNELS = {
+  DESKTOP_PREFERENCES: 'desktop:preferences',
+  DESKTOP_CONFIGURE: 'desktop:configure',
+  DESKTOP_LOGIN: 'desktop:login',
+  DESKTOP_PLACE: 'desktop:place',
+  PLATFORM_STATUS: 'platform:status',
+  PLATFORM_PERMISSION: 'platform:permission',
+  PLATFORM_OPEN_PERMISSION: 'platform:openPermission',
+  SPOTIFY_SETTINGS: 'spotify:settings',
+  SPOTIFY_CONFIGURE: 'spotify:configure',
+  SPOTIFY_CONNECT: 'spotify:connect',
+  SPOTIFY_DISCONNECT: 'spotify:disconnect',
+  SPOTIFY_DEVICES: 'spotify:devices',
+  SPOTIFY_PLAY: 'spotify:play',
   // Window
   DECK_TOGGLE: 'deck:toggle',
+  COMPANION_MENU: 'companion:menu',
+  COMPANION_CHAT_ACTIVE: 'companion:chatActive',
+  DESKTOP_OPEN_SETTINGS: 'desktop:settings',
   DECK_SHOW: 'deck:show',
   DECK_HIDE: 'deck:hide',
   DECK_STATUS: 'deck:status',
@@ -127,6 +143,8 @@ export const IPC_CHANNELS = {
   SCANNER_CLOSE: 'scanner:close',
   SCANNER_TOGGLE: 'scanner:toggle',
   SCANNER_GET_STATUS: 'scanner:getStatus',
+  SCANNER_FIT_SCREEN: 'scanner:fit-screen',
+  SCANNER_LOCAL_AI: 'scanner:local-ai',
   SCANNER_SET_BOUNDS: 'scanner:setBounds',
   SCANNER_SCAN: 'scanner:scan',
   SCANNER_SET_CONTINUOUS: 'scanner:setContinuous',
@@ -203,6 +221,8 @@ export interface ScannerBounds {
 }
 
 export interface ScannerStatusPayload {
+  localAIEnabled?: boolean
+  visionMode?: 'cloud' | 'local' | 'disabled'
   isOpen: boolean
   isScanning: boolean
   isContinuous: boolean

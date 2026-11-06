@@ -1,4 +1,7 @@
-import { app, BrowserWindow } from 'electron'
+import './services/mac-bootstrap'
+import { startScreenComments } from './services/screen-comment-service'
+import { isMac } from './services/platform'
+import { app, BrowserWindow, Menu } from 'electron'
 import { windowManager } from './windows/window-manager'
 import { registerIpcHandlers } from './ipc/register-handlers'
 import { systemObserver } from './services/system-observer'
@@ -21,7 +24,7 @@ process.on('uncaughtException', (err) => {
   const logMsg = `[${new Date().toISOString()}] Uncaught Exception: ${err?.stack || err}\n`
   console.error(logMsg)
   try {
-    fs.appendFileSync(path.join(app.getAppPath(), 'crash.log'), logMsg)
+    fs.appendFileSync(path.join(app.getPath('userData'), 'crash.log'), logMsg)
   } catch {}
 })
 
@@ -29,9 +32,11 @@ process.on('unhandledRejection', (reason) => {
   const logMsg = `[${new Date().toISOString()}] Unhandled Rejection: ${reason}\n`
   console.error(logMsg)
   try {
-    fs.appendFileSync(path.join(app.getAppPath(), 'crash.log'), logMsg)
+    fs.appendFileSync(path.join(app.getPath('userData'), 'crash.log'), logMsg)
   } catch {}
 })
+
+if (isMac) process.env.PATH = [...new Set([...(process.env.PATH || '').split(':'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'])].filter(Boolean).join(':')
 
 // Set app name
 app.setName('Capri Desktop')
@@ -41,6 +46,9 @@ if (!app.commandLine.hasSwitch('user-data-dir')) {
   const legacy = legacyUserDataDir(app.getPath('appData'), app.isPackaged, fs.existsSync)
   if (legacy) app.setPath('userData', legacy)
 }
+
+const testData = app.commandLine.getSwitchValue('user-data-dir')
+if (testData) app.setPath('userData', path.resolve(testData))
 
 // Ensure single instance lock so multiple companions don't overlap
 const gotTheLock = app.requestSingleInstanceLock()
@@ -63,7 +71,29 @@ if (!gotTheLock) {
     app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
   }
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    const systemReport=app.commandLine.getSwitchValue('mac-system-check')
+    if(isMac && systemReport && app.commandLine.hasSwitch('user-data-dir')) {
+      const {runMacSystemCheck}=await import('./services/mac-system-check')
+      await runMacSystemCheck(systemReport)
+      return
+    }
+    const visionReport=app.commandLine.getSwitchValue('cloud-vision-check')
+    if (isMac && visionReport && app.commandLine.hasSwitch('user-data-dir')) {
+      const {runCloudVisionCheck}=await import('./services/cloud-vision-check')
+      await runCloudVisionCheck(visionReport)
+      return
+    }
+    const smokeReport = app.commandLine.getSwitchValue('mac-smoke-test')
+    if (isMac && smokeReport && app.commandLine.hasSwitch('user-data-dir')) {
+      const { runMacSmokeTest } = await import('./services/mac-smoke-test')
+      await runMacSmokeTest(smokeReport)
+      return
+    }
+    if (isMac) Menu.setApplicationMenu(Menu.buildFromTemplate([
+      {label:app.getName(),submenu:[{role:'about'},{type:'separator'},{label:'Settings…',accelerator:'Command+,',click:()=>{windowManager.showDeck();windowManager.getDeckWindow()?.webContents.send('desktop:open-settings')}},{type:'separator'},{role:'hide'},{role:'hideOthers'},{role:'unhide'},{type:'separator'},{role:'quit'}]},
+      {role:'editMenu'},{role:'windowMenu'}
+    ]))
     // Initialize consciousness & persistent self-awareness
     consciousnessService.init()
 
@@ -72,6 +102,7 @@ if (!gotTheLock) {
 
     // Initialize companion and deck windows
     windowManager.init()
+    startScreenComments()
 
     // Setup still pending: the wizard takes care of the voice
     if (consciousnessService.isOnboardingDone()) {
@@ -86,7 +117,7 @@ if (!gotTheLock) {
     }
 
     // The game only loads its mods when it opens, so the mod has to be there before that
-    cyberpunkAdapter.installCetMod()
+    if (!isMac) cyberpunkAdapter.installCetMod()
 
     // First run after an update: Capri reads the patch scripts (scripts-capri/) once she's on screen
     setTimeout(() => {
@@ -100,7 +131,7 @@ if (!gotTheLock) {
     boredomService.start()
     proactiveDialogueService.start()
     gamePresenceService.start()
-    gameEventBus.start()
+    if (!isMac) gameEventBus.start()
     // Pre-warm local GPU Whisper STT worker for instant voice responses
     try {
       voiceService.ensureWorker()

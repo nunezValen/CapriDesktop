@@ -1,6 +1,11 @@
-import { llmFetch } from './llm-gateway'
+import { macGameContext } from './mac-game-context'
+import { localAIEnabled } from './local-ai-policy'
+import { localVisionModels, describeLocalImage } from './local-vision'
+import { scannerVisionMode, captureCrop } from '../../shared/platform-policy'
+import { llmFetch, isCloudMode, cloudVisionModel, describeCloudImage } from './llm-gateway'
 import { llmBody } from './user-profile'
-import { desktopCapturer, screen } from 'electron'
+import { isMac } from './platform'
+import { desktopCapturer, screen, systemPreferences, powerMonitor } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { windowManager } from '../windows/window-manager'
@@ -19,6 +24,10 @@ export class ScannerService {
   private isContinuous = false
   private continuousTimer: NodeJS.Timeout | null = null
   private lastScanTime = 0
+  private screenLocked = false
+  private initialized = false
+  private continuousGeneration = 0
+  private liveScanController: AbortController | null = null
   private lastSampleBuffer: Buffer | null = null
 
   public static getInstance(): ScannerService {
@@ -29,7 +38,17 @@ export class ScannerService {
   }
 
   public init(): void {
-    this.isContinuous = consciousnessService.getScannerContinuous()
+    if (!this.initialized) {
+      this.initialized = true
+      const pause = () => { this.screenLocked = true; this.setContinuous(false) }
+      const resume = () => { this.screenLocked = false }
+      powerMonitor.on('lock-screen', pause)
+      powerMonitor.on('suspend', pause)
+      powerMonitor.on('unlock-screen', resume)
+      powerMonitor.on('resume', resume)
+    }
+    this.isContinuous = consciousnessService.getScannerContinuous() && !(isMac && isCloudMode())
+    if (isMac && isCloudMode()) consciousnessService.setScannerContinuous(false)
     if (this.isContinuous) {
       this.startContinuousLoop()
     }
@@ -45,6 +64,8 @@ export class ScannerService {
     return {
       isOpen,
       isScanning: this.isScanning,
+      localAIEnabled: localAIEnabled(),
+      visionMode:scannerVisionMode(process.platform,isCloudMode(),localAIEnabled()),
       isContinuous: this.isContinuous,
       bounds
     }
@@ -64,6 +85,7 @@ export class ScannerService {
   public close(): boolean {
     windowManager.hideScanner()
     this.stopContinuousLoop()
+    if (isMac && isCloudMode()) this.setContinuous(false)
     this.broadcastStatus()
     return true
   }
@@ -77,8 +99,12 @@ export class ScannerService {
   }
 
   public setContinuous(enabled: boolean): boolean {
+    this.continuousGeneration++
+    if (!enabled) this.liveScanController?.abort()
+    if (enabled && !this.isContinuous) { this.lastSampleBuffer=null; this.lastScanTime=0 }
+    if (enabled && isMac && systemPreferences.getMediaAccessStatus('screen')!=='granted') throw new Error('Allow Screen Recording in Mac settings, then restart Capri.')
     this.isContinuous = enabled
-    consciousnessService.setScannerContinuous(enabled)
+    consciousnessService.setScannerContinuous(isMac && isCloudMode() ? false : enabled)
     if (enabled && this.getStatus().isOpen) {
       this.startContinuousLoop()
     } else {
@@ -102,13 +128,14 @@ export class ScannerService {
    * Excludes the frame overlay by momentarily making it invisible, applies DPI scaling,
    * crops to exact bounds, resizes to max 1024px side, and returns in-memory base64 JPEG.
    */
-  public async captureRegionBase64(): Promise<{ base64: string; width: number; height: number; rawBuffer: Buffer; bitmap: Buffer } | null> {
+  public async captureRegionBase64(fullScreen = false, displayPoint?: {x:number;y:number}): Promise<{ base64: string; width: number; height: number; rawBuffer: Buffer; bitmap: Buffer } | null> {
     const win = windowManager.getScannerWindow()
-    if (!win || win.isDestroyed() || !win.isVisible()) {
+    if (!fullScreen && (!win || win.isDestroyed() || !win.isVisible())) {
       return null
     }
 
-    const bounds = win.getBounds()
+    if (isMac && systemPreferences.getMediaAccessStatus('screen') !== 'granted') throw new Error('Allow Screen Recording for Capri Desktop in System Settings, then restart Capri.')
+    const bounds = win && !win.isDestroyed() ? win.getBounds() : screen.getPrimaryDisplay().bounds
 
     // Inner frame borders (leaving the transparent content area)
     const borderLeft = 45
@@ -116,21 +143,24 @@ export class ScannerService {
     const borderTop = 52
     const borderBottom = 50
 
-    const cropX = bounds.x + borderLeft
-    const cropY = bounds.y + borderTop
-    const cropW = Math.max(80, bounds.width - borderLeft - borderRight)
-    const cropH = Math.max(80, bounds.height - borderTop - borderBottom)
+    let cropX = bounds.x + borderLeft
+    let cropY = bounds.y + borderTop
+    let cropW = Math.max(80, bounds.width - borderLeft - borderRight)
+    let cropH = Math.max(80, bounds.height - borderTop - borderBottom)
 
     const centerPoint = { x: cropX + Math.round(cropW / 2), y: cropY + Math.round(cropH / 2) }
-    const currentDisplay = screen.getDisplayNearestPoint(centerPoint)
+    const currentDisplay = screen.getDisplayNearestPoint(fullScreen ? displayPoint || screen.getCursorScreenPoint() : centerPoint)
+    if (fullScreen) { cropX=currentDisplay.bounds.x; cropY=currentDisplay.bounds.y; cropW=currentDisplay.bounds.width; cropH=currentDisplay.bounds.height }
     const scale = currentDisplay.scaleFactor || 1
+    if (isMac && (cropX < currentDisplay.bounds.x || cropY < currentDisplay.bounds.y || cropX + cropW > currentDisplay.bounds.x + currentDisplay.bounds.width || cropY + cropH > currentDisplay.bounds.y + currentDisplay.bounds.height)) throw new Error('Keep the scanner capture region entirely on one display.')
 
     // Temporarily hide/opacity 0 on scanner window so it does not see its own overlay
-    win.setOpacity(0)
+    const overlayVisible=!!win && !win.isDestroyed() && win.isVisible()
+    if (overlayVisible) win!.setOpacity(0)
     await new Promise((resolve) => setTimeout(resolve, 90))
 
     try {
-      const sources = await desktopCapturer.getSources({
+      const getSources = () => desktopCapturer.getSources({
         types: ['screen'],
         thumbnailSize: {
           width: Math.round(currentDisplay.bounds.width * scale),
@@ -138,40 +168,31 @@ export class ScannerService {
         }
       })
 
+      let sources = await getSources()
+      for (let attempt=0; isMac && attempt<4 && sources.every(s=>s.thumbnail.isEmpty()); attempt++) {
+        await new Promise(resolve=>setTimeout(resolve,250))
+        sources=await getSources()
+      }
       const targetSource =
         sources.find((s) => s.display_id === String(currentDisplay.id)) ||
-        sources.find((s) => s.name.toLowerCase().includes(currentDisplay.id.toString())) ||
-        sources[0]
+        (!isMac ? sources.find((s) => s.name.toLowerCase().includes(currentDisplay.id.toString())) : undefined) ||
+        (sources.length === 1 && screen.getAllDisplays().length === 1 ? sources[0] : undefined)
 
       if (!targetSource) {
         return null
       }
 
-      // Map screen virtual coordinates to display local pixel coordinates
-      const localX = Math.round((cropX - currentDisplay.bounds.x) * scale)
-      const localY = Math.round((cropY - currentDisplay.bounds.y) * scale)
-      const localW = Math.round(cropW * scale)
-      const localH = Math.round(cropH * scale)
-
       const thumb = targetSource.thumbnail
+      if (thumb.isEmpty()) return null
       const thumbSize = thumb.getSize()
-
-      const safeX = Math.max(0, Math.min(localX, thumbSize.width - 10))
-      const safeY = Math.max(0, Math.min(localY, thumbSize.height - 10))
-      const safeW = Math.max(10, Math.min(localW, thumbSize.width - safeX))
-      const safeH = Math.max(10, Math.min(localH, thumbSize.height - safeY))
-
-      const cropped = thumb.crop({
-        x: safeX,
-        y: safeY,
-        width: safeW,
-        height: safeH
-      })
+      const crop = captureCrop(currentDisplay.bounds, {x: cropX, y: cropY, width: cropW, height: cropH}, thumbSize)
+      if (!crop) return null
+      const cropped = thumb.crop(crop)
 
       // Resize max side to ~768px for lightning-fast multimodal processing
       const croppedSize = cropped.getSize()
       let finalImg = cropped
-      const maxSide = 768
+      const maxSide = fullScreen ? 1280 : 1024
       if (croppedSize.width > maxSide || croppedSize.height > maxSide) {
         if (croppedSize.width >= croppedSize.height) {
           finalImg = cropped.resize({
@@ -190,11 +211,6 @@ export class ScannerService {
       const rawBuffer = finalImg.toJPEG(85)
       const base64 = rawBuffer.toString('base64')
 
-      try {
-        const scratchDir = path.join(process.cwd(), 'scratch')
-        if (!fs.existsSync(scratchDir)) fs.mkdirSync(scratchDir, { recursive: true })
-        fs.writeFileSync(path.join(scratchDir, 'last_scanner_capture.jpg'), rawBuffer)
-      } catch {}
 
       return {
         base64,
@@ -204,7 +220,7 @@ export class ScannerService {
         bitmap: finalImg.toBitmap()
       }
     } finally {
-      if (win && !win.isDestroyed()) {
+      if (overlayVisible && win && !win.isDestroyed()) {
         win.setOpacity(1)
         win.setAlwaysOnTop(true, 'screen-saver', 1)
         win.moveTop()
@@ -217,10 +233,7 @@ export class ScannerService {
    */
   public async detectVisionModel(): Promise<string | null> {
     try {
-      const resp = await llmFetch('http://127.0.0.1:11434/api/tags', { signal: AbortSignal.timeout(3000) })
-      if (!resp.ok) return null
-      const data = (await resp.json()) as any
-      const models: string[] = (data.models || []).map((m: any) => String(m.name))
+      const models = await localVisionModels()
 
       const configured = consciousnessService.getScannerVisionModel()
       if (configured && configured !== 'auto') {
@@ -230,6 +243,7 @@ export class ScannerService {
 
       const VISION_PRIORITIES = [
         'qwen2.5-vl',
+        'gemma3:4b',
         'llava',
         'minicpm-v',
         'llama3.2-vision',
@@ -281,8 +295,10 @@ export class ScannerService {
    * Preloads the vision and persona models into GPU/RAM with keep_alive so user scans are instant.
    */
   public async preloadVisionModel(): Promise<void> {
+    if (isMac) return // Load on explicit scan requests, keeping scarce unified memory free for chat.
     try {
-      await ollamaService.ensureRunning()
+      const local = await ollamaService.ensureRunning(true)
+      if (!local.running) throw new Error('Local vision requires Ollama. Open Ollama and try again; your cloud text model cannot inspect screenshots.')
       const model = await this.detectVisionModel()
       if (model) {
         console.log(`[ScannerService] Preloading vision model ${model} into GPU VRAM...`)
@@ -291,13 +307,14 @@ export class ScannerService {
           headers: { 'Content-Type': 'application/json' },
           body: llmBody({
             model,
-            keep_alive: '15m'
+            keep_alive: isMac ? 0 : '15m'
           }),
           signal: AbortSignal.timeout(90000)
         })
       }
 
-      const textModel = await this.detectTextModel()
+      // On an 8 GB personal Mac, avoid keeping both a vision model and a text model warm.
+      const textModel = isMac ? null : await this.detectTextModel()
       if (textModel) {
         console.log(`[ScannerService] Preloading text persona model ${textModel} into GPU VRAM...`)
         await llmFetch('http://127.0.0.1:11434/api/generate', {
@@ -305,7 +322,7 @@ export class ScannerService {
           headers: { 'Content-Type': 'application/json' },
           body: llmBody({
             model: textModel,
-            keep_alive: '15m'
+            keep_alive: isMac ? 0 : '15m'
           }),
           signal: AbortSignal.timeout(90000)
         })
@@ -319,17 +336,20 @@ export class ScannerService {
   /**
    * Main scan function: Captures region, calls multimodal model, triggers audio & HUD feedback
    */
-  public async scan(userPrompt?: string): Promise<ScannerScanResult> {
+  public async scan(userPrompt?: string, fullScreen = false, liveGeneration?: number): Promise<ScannerScanResult> {
+    if (this.screenLocked || (liveGeneration!==undefined && liveGeneration!==this.continuousGeneration)) return {success:false,error:'Scan stopped.'}
     if (this.isScanning) {
       return { success: false, error: 'A scan is already in progress' }
     }
 
     const win = windowManager.getScannerWindow()
-    if (!win || win.isDestroyed() || !win.isVisible()) {
+    if (!fullScreen && (!win || win.isDestroyed() || !win.isVisible())) {
       this.open()
       await new Promise((r) => setTimeout(r, 200))
     }
 
+    const controller=liveGeneration!==undefined ? new AbortController() : null
+    this.liveScanController=controller
     this.isScanning = true
     this.lastScanTime = Date.now()
 
@@ -340,73 +360,47 @@ export class ScannerService {
     })
 
     // Capri reacts with thinking / curious state
-    agentManager.setCompanionState('curious')
+    agentManager.setCompanionState(isMac ? 'thinking' : 'curious')
 
     const isEs = userPrompt ? /[áéíóúñ¿¡]|\b(mira|mirá|esto|que|como|dibujo|perro|gato|casa|logo|este|esta)\b/i.test(userPrompt) : false
 
     try {
+      const visionMode=scannerVisionMode(process.platform,isCloudMode(),localAIEnabled())
+      if (visionMode === 'disabled') throw new Error('Local AI is disabled. Select Enable local AI in the scanner only if you want local vision to run.')
       // Capture screenshot of the bounded area
-      const capture = await this.captureRegionBase64()
+      const capture = await this.captureRegionBase64(fullScreen)
       if (!capture) {
         throw new Error(isEs ? 'No se pudo capturar la región del marco.' : 'Could not capture region inside frame.')
       }
 
+      if (this.screenLocked || (liveGeneration!==undefined && liveGeneration!==this.continuousGeneration)) return {success:false,error:'Scan stopped.'}
       this.lastSampleBuffer = capture.rawBuffer
 
-      // Ensure Ollama is running
-      await ollamaService.ensureRunning()
-
-      // Check for installed vision model
-      const visionModel = await this.detectVisionModel()
-      if (!visionModel) {
-        const missingMsg = isEs
-          ? "¡Choomba! Mi marco de escaneo está listo, pero necesito que me instales un módulo de visión en Ollama. Abrí tu terminal y corré: ollama pull llava (o qwen2.5-vl), ¡y voy a poder ver todo lo que me muestres!"
-          : "Choomba! My scan frame is ready, but I need a vision module in Ollama. Open your terminal and run: ollama pull llava (or qwen2.5-vl), and I'll be able to see everything you show me!"
-
-        this.finishScanError(missingMsg)
-        return {
-          success: false,
-          error: 'No multimodal vision model installed in Ollama',
-          response: missingMsg
-        }
+      let visionModel=cloudVisionModel()
+      if (visionMode !== 'cloud') {
+        const local=await ollamaService.ensureRunning(true)
+        if (!local.running) throw new Error('Local vision requires Ollama. Open Ollama or select a cloud provider.')
+        visionModel=await this.detectVisionModel() || ''
+        if (!visionModel) throw new Error('No local vision model is installed. Select cloud vision or install an image-capable Ollama model.')
       }
 
       // Stage 1: Multimodal Vision Perception (fast, objective, hallucination-free)
       const visionPrompt = `Analyze the image inside the frame objectively and concisely in 1 or 2 sentences.
+Answer the user request using only visible evidence. User request: ${userPrompt || "Describe what is visible"}.
 Describe exactly what is shown:
 - Is it a hand-drawn doodle, a smiley face, a drawing in Paint, a sketch, user art, or a simple shape?
 - Is it an anime character/sprite with pink hair (Capri), an avatar, a game, a YouTube video, code/IDE, a website, a photo, or an app?
 - Mention the key shapes, colors, lines, and subjects clearly and honestly without making assumptions.`
 
       console.log(`[ScannerService] Stage 1: Calling vision model ${visionModel}...`)
-      const visionResp = await llmFetch('http://127.0.0.1:11434/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: llmBody({
-          model: visionModel,
-          keep_alive: '15m',
-          prompt: visionPrompt,
-          images: [capture.base64],
-          stream: false,
-          options: {
-            temperature: 0.2,
-            num_predict: 140
-          }
-        }),
-        signal: AbortSignal.timeout(60000)
-      })
-
-      if (!visionResp.ok) {
-        const errText = await visionResp.text()
-        throw new Error(`Vision model error ${visionResp.status}: ${errText}`)
-      }
-
-      const visionData = (await visionResp.json()) as any
-      const visualDescription = (visionData?.response || '').trim()
+      const visualDescription = visionMode === 'cloud'
+        ? await describeCloudImage(capture.base64,`${macGameContext.prompt()} Reply in ${consciousnessService.getPreferredLanguage()}. ${userPrompt ? `Your partner asks: ${JSON.stringify(userPrompt)}. Answer directly with your own personality using visible evidence.` : 'React to what your partner is showing you as their playful co-pilot, not as an image-captioning assistant. One or two short sentences; name the game if clearly visible, and do not invent events.'}`,controller?.signal)
+        : await describeLocalImage(visionModel,capture.base64,visionPrompt,isMac)
       console.log(`[ScannerService] Stage 1 Visual Description: "${visualDescription}"`)
 
       // Stage 2: Capri Netrunner Persona Reaction (warm, authentic, in-character)
-      const textModel = await this.detectTextModel()
+      // On an 8 GB personal Mac, avoid keeping both a vision model and a text model warm.
+      const textModel = isMac ? null : await this.detectTextModel()
       console.log(`[ScannerService] Stage 2: Calling persona model ${textModel}...`)
 
       const learnedList = consciousnessService.getLearnedConcepts()
@@ -516,12 +510,12 @@ Return ONLY valid JSON:
             ? `{name} asks: "${userPrompt}". Respond in character based on the visual description.`
             : `Tell {name} what you see and your reaction in character based on the visual description.`)
 
-      const textResp = await llmFetch('http://127.0.0.1:11434/api/chat', {
+      const textResp = isMac ? Response.json({ message: { content: JSON.stringify({ summary: visualDescription.slice(0, 120), tags: ['SCREEN'], response: visualDescription }) } }) : await llmFetch('http://127.0.0.1:11434/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: llmBody({
           model: textModel,
-          keep_alive: '15m',
+          keep_alive: isMac ? 0 : '15m',
           messages: [
             { role: 'system', content: systemInstruction },
             { role: 'user', content: userText }
@@ -544,6 +538,8 @@ Return ONLY valid JSON:
       const rawContent = textData?.message?.content || ''
 
       const parsedResult = this.parseVisionOutput(rawContent, isEs)
+
+      if (this.screenLocked || (liveGeneration!==undefined && liveGeneration!==this.continuousGeneration)) return {success:false,error:'Scan stopped.'}
 
       // Save to consciousness service so Capri can hold conversations and remember what was shown
       consciousnessService.setLastScannedContext({
@@ -587,18 +583,22 @@ Return ONLY valid JSON:
 
       return parsedResult
     } catch (err: any) {
+      if (liveGeneration!==undefined && (liveGeneration!==this.continuousGeneration || this.screenLocked)) return {success:false,error:'Live Scan stopped.'}
       console.error('[ScannerService] Scan error:', err)
       const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout')
       const errMessage = isTimeout
         ? (isEs
             ? 'El modelo de visión tardó un momento en cargar sus pesos a la GPU. Ya está listo, ¡tirale el escaneo de nuevo, choomba!'
-            : "The vision model took a moment to load weights into VRAM. It's warm now, hit scan again, choomba!")
+            : "The local vision model timed out. It may need more available memory; close unused apps and try again.")
         : (isEs
             ? `Glitcheo en el escáner óptico: ${err?.message || err}. ¡Reintentá en un instante, choomba!`
             : `Optical scanner glitch: ${err?.message || err}. Try again in a flash, choomba!`)
+      if (this.isContinuous) this.setContinuous(false)
       this.finishScanError(errMessage)
       return { success: false, error: err?.message || String(err), response: errMessage }
     } finally {
+      if (this.liveScanController===controller) this.liveScanController=null
+      if ((this.screenLocked || (liveGeneration!==undefined && liveGeneration!==this.continuousGeneration)) && agentManager.getCompanionState()==='thinking' && !agentManager.getStatus().isRunning) agentManager.setCompanionState('standing')
       this.isScanning = false
       this.broadcastStatus()
     }
@@ -650,7 +650,8 @@ Return ONLY valid JSON:
 
       // If generic subject or not a high-contrast line drawing, query vision model
       if (isGeneric || !vecResult?.isLineDrawing) {
-        await ollamaService.ensureRunning()
+        const local = await ollamaService.ensureRunning(true)
+      if (!local.running) throw new Error('Local vision requires Ollama. Open Ollama and try again; your cloud text model cannot inspect screenshots.')
         const visionModel = await this.detectVisionModel()
         if (visionModel) {
           const visionPrompt = `You are an expert design, sketch, and emblem analysis AI.
@@ -664,12 +665,12 @@ Analyze the drawing, logo, emblem, symbol, or illustration inside this frame car
 - Break down its key contours, silhouette, and proportions in 1 or 2 concise sentences.`
 
           try {
-            const visionResp = await llmFetch('http://127.0.0.1:11434/api/generate', {
+            const visionResp = await fetch('http://127.0.0.1:11434/api/generate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: llmBody({
                 model: visionModel,
-                keep_alive: '15m',
+                keep_alive: isMac ? 0 : '15m',
                 prompt: visionPrompt,
                 images: [capture.base64],
                 stream: false,
@@ -885,16 +886,18 @@ Analyze the drawing, logo, emblem, symbol, or illustration inside this frame car
   }
 
   private async tickContinuous(): Promise<void> {
-    if (!this.isContinuous || this.isScanning) return
+    if (!this.isContinuous || this.isScanning || this.screenLocked) return
     const win = windowManager.getScannerWindow()
     if (!win || win.isDestroyed() || !win.isVisible()) return
 
     // Cooldown check: at least 9 seconds between consecutive autonomous scans
-    if (Date.now() - this.lastScanTime < 9000) return
+    if (Date.now() - this.lastScanTime < (isMac && isCloudMode() ? 60000 : 9000)) return
+    if (['thinking','talking','sleep'].includes(agentManager.getCompanionState())) return
 
+    const generation=this.continuousGeneration
     try {
       const capture = await this.captureRegionBase64()
-      if (!capture || !capture.rawBuffer) return
+      if (!capture || !capture.rawBuffer || generation!==this.continuousGeneration || !this.isContinuous || this.screenLocked) return
 
       if (this.lastSampleBuffer) {
         const diffRatio = this.calculateBufferDiff(this.lastSampleBuffer, capture.rawBuffer)
@@ -902,13 +905,14 @@ Analyze the drawing, logo, emblem, symbol, or illustration inside this frame car
         if (diffRatio > 0.18) {
           const prefLang = consciousnessService.getPreferredLanguage()
           const prompt = prefLang === 'es' ? 'Contenido actualizado en el marco' : 'Updated content inside frame'
-          await this.scan(prompt)
+          await this.scan(prompt,false,generation)
         }
       } else {
-        this.lastSampleBuffer = capture.rawBuffer
+        await this.scan(undefined,false,generation)
       }
     } catch {
-      // Quiet fail on continuous sample
+      this.setContinuous(false)
+      // Stop on revoked permissions instead of retrying forever.
     }
   }
 

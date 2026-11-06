@@ -210,7 +210,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ transparent = false }) => 
       } overflow-hidden select-text`}
     >
       {/* Messages Scroll Area */}
-      <div ref={chatScrollRef} className="flex-1 p-3 overflow-y-auto space-y-3 cp-mono text-[14px]">
+      <div ref={chatScrollRef} className="cp-deck-messages flex-1 p-3 overflow-y-auto space-y-3 cp-mono text-[14px]">
         {messages.map((msg) => {
           const isUser = msg.role === 'user'
 
@@ -359,7 +359,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ transparent = false }) => 
       {/* Terminal CLI Prompt Input Bar */}
       <form
         onSubmit={handleSend}
-        className={`p-2.5 ${
+        className={`cp-deck-composer p-2.5 ${
           transparent
             ? 'bg-black/65 border-t border-[#311718]/80 backdrop-blur-md'
             : 'bg-[#170a0b] border-t border-[#311718]'
@@ -371,6 +371,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ transparent = false }) => 
         </span>
         <input
           type="text"
+          aria-label={tr('chat_placeholder')}
           value={promptInput}
           onChange={(e) => setPromptInput(e.target.value)}
           placeholder={

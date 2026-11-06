@@ -9,6 +9,7 @@ const PROBLEM_TEXT = { needsModifier: 'vs_hotkeyNeedsModifier', reserved: 'vs_ho
 /** Which keys do what, chosen by pressing them, and whether they also work over other apps */
 export const HotkeySettings: React.FC = () => {
   const t = useT()
+  const isMac=/Mac/i.test(navigator.platform)
   const [hotkeys, setHotkeys] = useState<Hotkeys>(DEFAULT_HOTKEYS)
   const [enabled, setEnabled] = useState(true)
   const [choosing, setChoosing] = useState<HotkeyAction | null>(null)
@@ -61,7 +62,7 @@ export const HotkeySettings: React.FC = () => {
           </button>
         </div>
       ))}
-      {problem && <p className="text-[13px] text-amber-400">{t(PROBLEM_TEXT[problem])}</p>}
+      {problem && <p className="text-[13px] text-amber-400">{isMac && problem==='reserved' ? 'That key is reserved by Capri. Choose another combination.' : t(PROBLEM_TEXT[problem])}</p>}
       <label className="flex items-center gap-2 text-[13px] text-stone-300 cursor-pointer select-none">
         <input
           type="checkbox"
@@ -71,7 +72,7 @@ export const HotkeySettings: React.FC = () => {
             void window.api.voice.setArrowKeys(e.target.checked)
           }}
         />
-        {t('vs_arrowKeys')}
+        {isMac ? 'Use these shortcuts in other apps (⌘⌥V always works)' : t('vs_arrowKeys')}
       </label>
       <button
         type="button"
@@ -82,7 +83,7 @@ export const HotkeySettings: React.FC = () => {
         }}
         className="px-3 py-1 border border-stone-700 text-stone-200 text-[13px] hover:border-stone-500"
       >
-        {t('vs_hotkeyReset')}
+        {isMac ? 'Reset Mac shortcuts' : t('vs_hotkeyReset')}
       </button>
     </div>
   )

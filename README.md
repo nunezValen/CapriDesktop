@@ -1,5 +1,7 @@
 # Capri Desktop
 
+**Apple Silicon macOS port (upstream 1.0.4 / Mac revision 13):** see [MACOS.md](MACOS.md) for installation, voice setup, all Mac shortcuts and limitations. Open settings with **⌘,**. If an update breaks Screen Recording or Accessibility (called **Device Control and Data Access** on some macOS versions), remove the old Capri entry in System Settings → Privacy & Security, fully quit Capri, re-add and enable the installed app, then restart Capri. See the detailed permission-repair steps in MACOS.md. The upstream documentation below describes the original Windows/Linux release.
+
 <p align="center">
   <img src="src/renderer/src/assets/capri/walking/walking.gif" alt="Capri walking" width="260">
 </p>

@@ -1,5 +1,5 @@
 import * as os from 'os'
-import { isLinux, linuxSteamAppsDirs, listProcessNames, windowsSteamAppsDirs } from '../../../platform'
+import { isMac, isLinux, linuxSteamAppsDirs, listProcessNames, windowsSteamAppsDirs } from '../../../platform'
 import { assetPath } from '../../../app-paths'
 /** Cyberpunk 2077 adapter: process detection, local telemetry server (port 2077) and CET mod event files. */
 
@@ -81,6 +81,7 @@ export class CyberpunkAdapter extends EventEmitter implements GameAdapter {
    * Probes if Cyberpunk 2077 is currently running or actively transmitting telemetry
    */
   public async detect(): Promise<boolean> {
+    if (isMac) return false
     if (Date.now() - this.lastTelemetryTimestamp < 45000) {
       return true
     }
@@ -104,6 +105,7 @@ export class CyberpunkAdapter extends EventEmitter implements GameAdapter {
    * Starts the Cyberpunk telemetry server, process monitor, and file watcher
    */
   public async start(): Promise<void> {
+    if (isMac) return
     if (this.running) return
     this.running = true
     this.isGameRunning = true
@@ -635,6 +637,7 @@ export class CyberpunkAdapter extends EventEmitter implements GameAdapter {
    * It runs when she starts, because the game only loads its mods when it opens.
    */
   public installCetMod(): void {
+    if (isMac) return
     try {
       const source = assetPath('game_data', 'cyberpunk_mod', 'init.lua')
       if (!fs.existsSync(source)) return

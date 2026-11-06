@@ -5,6 +5,7 @@
  * answer "nothing" and the features that need them stay quiet instead of failing.
  */
 
+import { macHelper, macWindows, quitMacApp } from './mac-desktop'
 import { exec, execFile, spawn } from './hidden-process'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -12,12 +13,13 @@ import * as path from 'path'
 
 export const isWindows = process.platform === 'win32'
 export const isLinux = process.platform === 'linux'
+export const isMac = process.platform === 'darwin'
 
 // Lookups
 
 /** Full path of a command found in PATH, or null. Doesn't run anything */
 export function findOnPath(name: string): string | null {
-  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
+  const dirs = [...(process.env.PATH || '').split(path.delimiter).filter(Boolean), ...(isMac ? ['/opt/homebrew/bin', '/opt/homebrew/opt/python@3.11/libexec/bin', '/Library/Frameworks/Python.framework/Versions/3.11/bin', '/usr/local/bin', '/Applications/Ollama.app/Contents/Resources'] : [])]
   const exts = isWindows ? ['.exe', '.cmd', '.bat', ''] : ['']
   for (const dir of dirs) {
     for (const ext of exts) {
@@ -39,6 +41,7 @@ function shellQuote(value: string): string {
 
 /** Shell command that opens a URL, URI, file or registered app with the system's default handler */
 export function startCommand(target: string): string {
+  if (isMac) return `/usr/bin/open ${shellQuote(target)}`
   return isWindows ? `cmd.exe /c start "" "${target}"` : `xdg-open ${shellQuote(target)}`
 }
 
@@ -111,6 +114,10 @@ export async function readLinuxProcesses(): Promise<LinuxProcess[]> {
  * everywhere (a Proton game already has it). Null if the list couldn't be read.
  */
 export async function listProcessNames(): Promise<Set<string> | null> {
+  if (isMac) {
+    const procs = await macHelper<{name: string}[]>('processes').catch(() => [])
+    return new Set(procs.map(p => `${p.name.toLowerCase()}.exe`))
+  }
   if (isWindows) {
     return new Promise((resolve) => {
       exec('tasklist /fo csv /nh', { timeout: 3000 }, (_err, stdout) => {
@@ -158,6 +165,7 @@ export function pidsToKill(procs: Pick<LinuxProcess, 'pid' | 'names'>[], names: 
 
 /** Closes processes by name, with or without ".exe". Force-kills on Windows, asks them to quit on Linux */
 export function killProcesses(names: string[]): void {
+  if (isMac) { for (const name of names) void quitMacApp(name).catch(() => {}); return }
   if (isWindows) {
     const images = names.map((n) => `/IM "${n.replace(/\.exe$/i, '')}.exe"`).join(' ')
     exec(`taskkill ${images} /F`)
@@ -285,6 +293,7 @@ export const LINUX_EDITORS = ['gnome-text-editor', 'gedit', 'kate', 'kwrite', 'm
 // Windows (X11 / XWayland)
 
 export interface ForegroundWindow {
+  bounds?: { x:number; y:number; width:number; height:number }
   title: string
   process: string
   path: string
@@ -417,6 +426,7 @@ export async function linuxMediaWindows(): Promise<{ proc: string; title: string
 
 /** Browser and Spotify window titles for the media detection. Null if they couldn't be read */
 export async function mediaWindowTitles(): Promise<{ proc: string; title: string }[] | null> {
+  if (isMac) return (await macWindows().catch(() => [])).map(w => ({proc: `${w.process.toLowerCase()}.exe`, title: w.title}))
   if (!isWindows) return linuxMediaWindows()
   const cmd =
     'tasklist /v /fo csv /fi "IMAGENAME eq opera.exe" & tasklist /v /fo csv /fi "IMAGENAME eq opera_gx.exe" & tasklist /v /fo csv /fi "IMAGENAME eq chrome.exe" & tasklist /v /fo csv /fi "IMAGENAME eq msedge.exe" & tasklist /v /fo csv /fi "IMAGENAME eq brave.exe" & tasklist /v /fo csv /fi "IMAGENAME eq firefox.exe" & tasklist /v /fo csv /fi "IMAGENAME eq spotify.exe"'

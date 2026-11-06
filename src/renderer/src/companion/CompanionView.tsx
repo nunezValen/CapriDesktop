@@ -1,3 +1,6 @@
+import { gameCompanionState } from '../../../shared/companion-appearance'
+import { ShakeDetector } from '../../../shared/mac-feature-policy'
+import { wakeListeningPrompt } from '../../../shared/voice-policy'
 import { personalize } from '../utils/userName'
 import { AlwaysListener } from '../utils/alwaysListening'
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
@@ -45,6 +48,7 @@ const MIN_MIC_LEVEL = 3
 // The view can mount twice (React's StrictMode, a reload of the window); she only says hello once
 let greeted = false
 function greetedThisSession(): boolean {
+  if (/Mac/i.test(navigator.platform)) return true
   if (greeted) return true
   greeted = true
   try {
@@ -144,7 +148,7 @@ export const CompanionView: React.FC = () => {
     const onMove = (e: MouseEvent) => {
       const art = document.querySelector('[data-capri-art]')
       const over = document.elementFromPoint(e.clientX, e.clientY)
-      if (e.buttons || !art || document.querySelector('.fixed.inset-0') || over?.closest('input,textarea,button,select,a,[data-capri-ui]')) {
+      if (e.buttons || !art || document.querySelector('.fixed.inset-0') || over?.closest('input,textarea,button,select,a,[data-capri-ui],.cp-frame')) {
         set(false)
         return
       }
@@ -165,15 +169,15 @@ export const CompanionView: React.FC = () => {
   useEffect(() => {
     if (!isGamingMode || !window.api?.companion?.setClickThrough) return
     let ignoring = true
-    window.api.companion.setClickThrough(true).catch(() => {})
+    window.api.companion.setClickThrough(!isDesktopChatOpenRef.current).catch(() => {})
     const update = (ctrl: boolean) => {
-      const want = !ctrl
+      const want = !ctrl && !isDesktopChatOpenRef.current
       if (want === ignoring) return
       ignoring = want
       window.api.companion.setClickThrough(want).catch(() => {})
     }
-    const onMove = (e: MouseEvent) => update(e.ctrlKey)
-    const onKey = (e: KeyboardEvent) => update(e.ctrlKey)
+    const onMove = (e: MouseEvent) => update(e.ctrlKey || (/Mac/i.test(navigator.platform) && e.metaKey))
+    const onKey = (e: KeyboardEvent) => update(e.ctrlKey || (/Mac/i.test(navigator.platform) && e.metaKey))
     const onLeave = () => update(false)
     window.addEventListener('mousemove', onMove)
     window.addEventListener('keydown', onKey)
@@ -187,6 +191,10 @@ export const CompanionView: React.FC = () => {
     }
   }, [isGamingMode])
   const [isVoiceSettingsOpen, setIsVoiceSettingsOpen] = useState<boolean>(false)
+  const openVoiceSettings = () => {
+    if (/Mac/i.test(navigator.platform)) void window.api.desktop.openSettings(true)
+    else setIsVoiceSettingsOpen(true)
+  }
   const [isContextMenuOpen, setIsContextMenuOpen] = useState<boolean>(false)
   const tr = useT()
 
@@ -371,6 +379,9 @@ export const CompanionView: React.FC = () => {
   const lastAssistantContentRef = useRef<string>('')
 
   const [isAlwaysListening, setIsAlwaysListening] = useState(false)
+  const alwaysStartingRef = useRef(false)
+  const alwaysTranscribingRef = useRef(false)
+  const alwaysGenerationRef = useRef(0)
   const alwaysListenerRef = useRef<AlwaysListener | null>(null)
   const followUpUntilRef = useRef(0)
   const awaitingFollowUpRef = useRef(false)
@@ -969,21 +980,32 @@ export const CompanionView: React.FC = () => {
   // seconds to keep talking without repeating "Capri".
   const toggleAlwaysListening = async () => {
     const isEs = currentLangRef.current === 'es'
+    if (alwaysStartingRef.current) return
+    alwaysGenerationRef.current++
     if (alwaysListenerRef.current?.active) {
       alwaysListenerRef.current.stop()
       alwaysListenerRef.current = null
       setIsAlwaysListening(false)
       followUpUntilRef.current = 0
+      awaitingFollowUpRef.current = false
       try { localStorage.setItem('capri.alwaysListening', '0') } catch {}
-      setSpeech(isEs ? 'Listo, dejo de escucharte. Flecha derecha para volver a activarme.' : 'Okay, I stopped listening. Right arrow to turn me back on.', 3000)
+      setSpeech(/Mac/i.test(navigator.platform) ? 'Listening off. Use ⌘⌥L or the right-click menu to turn it on.' : isEs ? 'Listo, dejo de escucharte. Flecha derecha para volver a activarme.' : 'Okay, I stopped listening. Right arrow to turn me back on.', 3000)
       return
     }
 
+    alwaysStartingRef.current = true
     const listener = new AlwaysListener({
+      onError: (error) => {
+        alwaysGenerationRef.current++
+        alwaysListenerRef.current = null
+        setIsAlwaysListening(false)
+        setSpeech(error.message, 5000)
+      },
       isPaused: () =>
         // The Dev Deck has its own mic: hearing "Capri" from it here sent a second prompt
         // that cut the deck's recording and hid the user's message
         isDeckOpenRef.current ||
+        alwaysTranscribingRef.current ||
         isSpeakingRef.current ||
         isSynthesizingVoiceRef.current ||
         isRecordingVoiceRef.current ||
@@ -999,28 +1021,40 @@ export const CompanionView: React.FC = () => {
       setIsAlwaysListening(true)
       try { localStorage.setItem('capri.alwaysListening', '1') } catch {}
       setSpeech(
-        isEs ? 'Te escucho todo el tiempo, choomba. Decí "Capri" cuando me hables a mí.' : 'Always listening, choomba. Say "Capri" when you are talking to me.',
+        isEs ? 'Te escucho todo el tiempo, choomba. Decí "Capri" cuando me hables a mí.' : 'Listening. Say "Hey Capri" followed by your request.',
         3500
       )
     } catch (err) {
+      listener.stop()
       console.error('[AlwaysListening] Could not open the microphone:', err)
       setSpeech(micErrorLine(micErrorKind(err)), 6000)
+    } finally {
+      alwaysStartingRef.current = false
     }
   }
   toggleAlwaysListeningRef.current = toggleAlwaysListening
 
   handleAlwaysUtteranceRef.current = async (wav: ArrayBuffer) => {
-    if (!window.api?.voice) return
+    if (!window.api?.voice || alwaysTranscribingRef.current || !alwaysListenerRef.current?.active) return
+    const generation = alwaysGenerationRef.current
+    alwaysTranscribingRef.current = true
     try {
       const res = await window.api.voice.transcribe(wav)
+      if (generation !== alwaysGenerationRef.current || !alwaysListenerRef.current?.active || isDeckOpenRef.current || isRecordingVoiceRef.current) return
+      if (!res.success && res.error && !/no speech detected/i.test(res.error)) {
+        alwaysListenerRef.current.stop()
+        alwaysListenerRef.current = null
+        setIsAlwaysListening(false)
+        setSpeech(`Voice recognition unavailable: ${res.error}`, 6000)
+        return
+      }
       const heard = res.success && res.text ? res.text.trim() : ''
       if (!heard) return
 
       const inFollowUp = Date.now() < followUpUntilRef.current
       const check = await window.api.voice.wakeCheck(heard)
-      let prompt: string | null = null
-      if (check.addressed) prompt = check.text
-      else if (inFollowUp && heard.split(/\s+/).length >= 2) prompt = heard
+      if (generation !== alwaysGenerationRef.current || !alwaysListenerRef.current?.active) return
+      const prompt = wakeListeningPrompt(/Mac/i.test(navigator.platform), heard, check, inFollowUp)
 
       console.log(`[AlwaysListening] heard "${heard}" -> ${prompt ? `respond (${check.addressed ? check.reason : 'follow-up'})` : 'ignored'}`)
       if (!prompt || isExecutingRef.current) return
@@ -1031,12 +1065,14 @@ export const CompanionView: React.FC = () => {
       handleSendMessageRef.current(prompt)
     } catch (err) {
       console.warn('[AlwaysListening] utterance failed:', err)
+    } finally {
+      alwaysTranscribingRef.current = false
     }
   }
 
   // Open the follow-up window once Capri has finished answering
   useEffect(() => {
-    if (!isSpeaking && !isExecuting && awaitingFollowUpRef.current && alwaysListenerRef.current?.active) {
+    if (!/Mac/i.test(navigator.platform) && !isSpeaking && !isExecuting && awaitingFollowUpRef.current && alwaysListenerRef.current?.active) {
       awaitingFollowUpRef.current = false
       followUpUntilRef.current = Date.now() + 8000
     }
@@ -1065,6 +1101,7 @@ export const CompanionView: React.FC = () => {
     } catch {}
     return () => {
       unsubs.forEach((u) => u())
+      alwaysGenerationRef.current++
       alwaysListenerRef.current?.stop()
     }
   }, [])
@@ -1356,7 +1393,7 @@ export const CompanionView: React.FC = () => {
   }, [setEmotion, setSpeech, setRoamingStatus, setTabMode, isEyeMode, isDesktopChatOpen])
 
   // Desktop companion state: normal walking/standing/idle roaming behavior by default
-  const desktopCompanionState = useMemo<CompanionEmotionState>(() => {
+  const requestedCompanionState = useMemo<CompanionEmotionState>(() => {
     // A script decides her look word by word, above everything else. Between its lines she stays
     // in the talking animation instead of flashing another pose.
     if (scriptLook) return scriptLook
@@ -1368,6 +1405,9 @@ export const CompanionView: React.FC = () => {
     // 0.1 Scared Grab (Shift + Right Click or active scared state)
     // must always override talking. When scared, capri asustada.mp4 must play, never Capri2 talking
     if (emotion === 'asustada' || isScaredActiveRef.current) return 'asustada'
+
+    // Pending replies must remain visible even when sitting or using desktop chat/eye mode.
+    if (/Mac/i.test(navigator.platform) && (isExecuting || isSynthesizingVoice || emotion === 'thinking') && !isGamingMode) return 'thinking'
 
     // Audio Voice Active OR Active Dialogue in speech bubble (when muted):
     // Stays consistently in 'talking' (Capri2 - Trim.mp4 video) while actively speaking
@@ -1416,6 +1456,8 @@ export const CompanionView: React.FC = () => {
     // Default desktop state: standing full-body avatar (never ojos!)
     return 'standing'
   }, [scriptLook, isScriptPlaying, isSpeaking, speech, isTabMode, isDesktopChatOpen, isEyeMode, emotion, isExecuting, isSynthesizingVoice, isRoaming, isRecordingVoice, isGamingMode])
+
+  const desktopCompanionState = gameCompanionState(navigator.platform, isGamingMode, requestedCompanionState)
 
   // Dynamic user-facing label representing Capri's current active state
   const companionStatusLabel = useMemo(() => {
@@ -1573,6 +1615,8 @@ export const CompanionView: React.FC = () => {
 
     const isRightClick = e.button === 2
     const isLeftClick = e.button === 0
+    // macOS secondary click opens the menu; only left-button dragging moves Capri.
+    if (isRightClick && /Mac/i.test(navigator.platform)) { e.stopPropagation(); return }
     // Plain right click triggers Scared Grab
     const isScaredGrab = isRightClick
 
@@ -1592,8 +1636,11 @@ export const CompanionView: React.FC = () => {
       moved: false
     }
 
+    let lastMoveAt=0
+    const shake=new ShakeDetector()
+    let shaken=false
     const onMouseMove = (moveEvent: MouseEvent) => {
-      if (!dragStartRef.current) return
+      if (!dragStartRef.current || !(moveEvent.buttons & (isRightClick ? 2 : 1))) return
       const dx = moveEvent.screenX - dragStartRef.current.lastX
       const dy = moveEvent.screenY - dragStartRef.current.lastY
 
@@ -1601,6 +1648,10 @@ export const CompanionView: React.FC = () => {
         moveEvent.screenX - dragStartRef.current.startX,
         moveEvent.screenY - dragStartRef.current.startY
       )
+      if (/Mac/i.test(navigator.platform) && !isGamingMode && !shaken && shake.update(moveEvent.screenX,performance.now())) {
+        shaken=true
+        triggerScaredReaction()
+      }
       if (totalDist > 10) {
         if (!dragStartRef.current.moved && isScaredGrab) {
           triggerScaredReaction()
@@ -1614,7 +1665,8 @@ export const CompanionView: React.FC = () => {
         }
       }
 
-      if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+      if (dragStartRef.current.moved && (Math.abs(dx) > 0 || Math.abs(dy) > 0) && performance.now()-lastMoveAt >= 16) {
+        lastMoveAt=performance.now()
         dragStartRef.current.lastX = moveEvent.screenX
         dragStartRef.current.lastY = moveEvent.screenY
         if (window.api?.companion?.moveBy) {
@@ -1626,7 +1678,7 @@ export const CompanionView: React.FC = () => {
     const onMouseUp = () => {
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
-      if (dragStartRef.current?.moved || isScaredGrab) {
+      if (dragStartRef.current?.moved) {
         if (isGamingMode) {
           // Requirement: "tambien en el gaming mode debes poder ser capaz de moverla pero ella siempre se debe quedar en donde la dejaste"
           // Keep strictly in 'ojos', no roaming, no switching to happy/standing, stays right where the user dropped her
@@ -1642,7 +1694,7 @@ export const CompanionView: React.FC = () => {
           window.api.companion.setTabMode(false, true)
         }
 
-        if (isScaredGrab) {
+        if (isScaredGrab || shaken) {
           isScaredActiveRef.current = true
           const isReleaseEs = currentLangRef.current === 'es'
           const scaredReleasePhrases = isReleaseEs
@@ -1718,6 +1770,7 @@ export const CompanionView: React.FC = () => {
     e.preventDefault()
     e.stopPropagation()
     if (dragStartRef.current?.moved || isScaredActiveRef.current) return
+    if (/Mac/i.test(navigator.platform)) { void window.api.companion.showMenu(); return }
     setIsContextMenuOpen((prev) => !prev)
   }
 
@@ -1726,6 +1779,7 @@ export const CompanionView: React.FC = () => {
     const next = !isDesktopChatOpenRef.current
     setIsDesktopChatOpen(next)
     if (next) {
+      if (/Mac/i.test(navigator.platform)) void window.api.companion.setChatActive(true)
       window.api?.companion?.setEyeMode?.(true)
       window.api?.roaming?.setActive(false)
       const isEs = currentLangRef.current === 'es'
@@ -1805,7 +1859,7 @@ export const CompanionView: React.FC = () => {
     if (isVoiceSettingsCmd) {
       setIsExecuting(false)
       isExecutingRef.current = false
-      setIsVoiceSettingsOpen(true)
+      openVoiceSettings()
 
       const userMsg: DesktopChatMessage = {
         id: `user-${Date.now()}`,
@@ -1996,7 +2050,7 @@ export const CompanionView: React.FC = () => {
 
                     <button
                       type="button"
-                      onClick={() => setIsVoiceSettingsOpen(true)}
+                      onClick={() => openVoiceSettings()}
                       className="p-1.5 rounded text-xs font-bold transition-all cursor-pointer bg-black/80 hover:bg-cyan-950/60 text-cyan-400 border border-cyan-500/40 hover:border-cyan-400"
                       title="Configurar Voz TTS (Fish Audio / Edge-TTS / ElevenLabs)"
                     >
@@ -2124,7 +2178,7 @@ export const CompanionView: React.FC = () => {
 
                     <button
                       type="button"
-                      onClick={() => setIsVoiceSettingsOpen(true)}
+                      onClick={() => openVoiceSettings()}
                       className="p-1.5 rounded text-xs font-bold transition-all cursor-pointer bg-black/80 hover:bg-cyan-950/60 text-cyan-400 border border-cyan-500/40 hover:border-cyan-400"
                       title="Configurar Voz TTS (Fish Audio / Edge-TTS / ElevenLabs)"
                     >
@@ -2202,7 +2256,7 @@ export const CompanionView: React.FC = () => {
                     <span className="font-hud tracking-wide text-white">Capri</span>
                     <span className="text-zinc-500 font-normal">|</span>
                     <span className="text-[#00f0ff] font-semibold">{companionStatusLabel}</span>
-                    <span className="text-[9px] text-zinc-400 font-normal opacity-70 ml-0.5">(Ctrl + {localizeLine('Click', currentLang)})</span>
+                    <span className="text-[9px] text-zinc-400 font-normal opacity-70 ml-0.5">({/Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'} + {localizeLine('Click', currentLang)})</span>
                   </button>
 
                   <button
@@ -2291,7 +2345,7 @@ export const CompanionView: React.FC = () => {
               <span className="font-hud tracking-wide text-white">Capri</span>
               <span className="text-zinc-500 font-normal">|</span>
               <span className="text-[#00f0ff] font-semibold">{companionStatusLabel}</span>
-              <span className="text-[9px] text-zinc-400 font-normal opacity-70 ml-0.5">(Ctrl + {localizeLine('Click', currentLang)})</span>
+              <span className="text-[9px] text-zinc-400 font-normal opacity-70 ml-0.5">({/Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'} + {localizeLine('Click', currentLang)})</span>
             </button>
 
             <button
@@ -2343,6 +2397,7 @@ export const CompanionView: React.FC = () => {
         <div
           onMouseDown={handleCapriMouseDown}
           onContextMenu={handleCapriContextMenu}
+          data-capri-avatar="true"
           className={`w-full ${isTabMode ? 'h-[190px]' : 'h-[235px]'} flex items-end justify-center relative z-10 cursor-pointer overflow-visible select-none`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
@@ -2355,11 +2410,11 @@ export const CompanionView: React.FC = () => {
                 e.stopPropagation()
                 toggleAlwaysListeningRef.current()
               }}
-              className="cp-cut cp-font uppercase tracking-wider absolute top-1 right-3 z-30 flex items-center gap-1 px-2 py-0.5 bg-black/85 border border-cyan-300/70 text-cyan-300 text-[11px] font-bold cursor-pointer hover:bg-[#1a0d0e]"
-              title={tr('cp_listeningTitle')}
+              className="cp-cut cp-font uppercase tracking-wider absolute bottom-1 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2 py-0.5 bg-black/85 border border-cyan-300/70 text-cyan-300 text-[11px] font-bold cursor-pointer hover:bg-[#1a0d0e]"
+              title={/Mac/i.test(navigator.platform) ? 'Say Hey Capri, then your request. Click or ⌘⌥L to stop listening.' : tr('cp_listeningTitle')}
             >
               <span className="relative flex w-1.5 h-1.5">
-                <span className="absolute inline-flex w-full h-full bg-cyan-300 opacity-75 animate-ping" />
+                <span className="absolute inline-flex w-full h-full bg-cyan-300 opacity-30" />
                 <span className="relative inline-flex w-1.5 h-1.5 bg-cyan-300" />
               </span>
               <Ear size={11} className="text-cyan-300" />
@@ -2424,9 +2479,17 @@ export const CompanionView: React.FC = () => {
           </div>
 
           <button
+            onClick={() => { setIsContextMenuOpen(false); toggleAlwaysListeningRef.current() }}
+            className="w-full px-4 py-3 text-left text-cyan-300 hover:bg-white/5"
+          >
+            {isAlwaysListening ? 'Stop listening' : 'Enable “Hey Capri”'}
+            <span className="block text-[11px] text-stone-500">{/Mac/i.test(navigator.platform) ? 'Shortcut: ⌘⌥L.' : 'Shortcut: →.'} Speech recognition stays on this device.</span>
+          </button>
+
+          <button
             onClick={() => {
               setIsContextMenuOpen(false)
-              setIsVoiceSettingsOpen(true)
+              openVoiceSettings()
             }}
             className="flex items-center gap-2 px-2.5 py-1.5 rounded-none hover:bg-[#2a1213] text-cp-500 hover:text-white transition-colors text-left cursor-pointer"
           >

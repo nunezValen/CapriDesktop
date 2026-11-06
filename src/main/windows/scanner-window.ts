@@ -1,10 +1,12 @@
+import { isMac } from '../services/platform'
 import { assetPath } from '../services/app-paths'
 import { BrowserWindow, screen, app } from 'electron'
 import { join } from 'path'
 import { consciousnessService } from '../services/consciousness-service'
 
 export function createScannerWindow(): BrowserWindow {
-  const primaryDisplay = screen.getPrimaryDisplay()
+  const saved = consciousnessService.getScannerBounds()
+  const primaryDisplay = isMac ? screen.getDisplayMatching(saved) : screen.getPrimaryDisplay()
   const { workArea } = primaryDisplay
 
   const savedBounds = consciousnessService.getScannerBounds()
@@ -14,7 +16,7 @@ export function createScannerWindow(): BrowserWindow {
   let x = savedBounds.x
   let y = savedBounds.y
 
-  if (x < 0 || y < 0 || x > workArea.x + workArea.width - 100 || y > workArea.y + workArea.height - 100) {
+  if ((isMac ? x < workArea.x || y < workArea.y : x < 0 || y < 0) || x > workArea.x + workArea.width - 100 || y > workArea.y + workArea.height - 100) {
     x = Math.round(workArea.x + (workArea.width - width) / 2)
     y = Math.round(workArea.y + (workArea.height - height) / 2)
   }
@@ -24,6 +26,7 @@ export function createScannerWindow(): BrowserWindow {
 
   const scannerWindow = new BrowserWindow({
     title: 'Capri // Neural Scanner Frame',
+    ...(isMac ? { type: 'panel' } : {}),
     icon: iconPath,
     width,
     height,

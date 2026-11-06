@@ -1,3 +1,4 @@
+import { isMac } from './platform'
 import { llmFetch } from './llm-gateway'
 import { llmBody } from './user-profile'
 /**
@@ -248,6 +249,7 @@ export class MacroService {
     this.load()
     const parsed = (await this.parseWithLlm(sentence, endpoint)) || this.parseHeuristic(sentence)
     if (!parsed || !parsed.trigger || parsed.actions.length === 0) return null
+    if (isMac && parsed.actions.some(a => a.type === 'command')) throw new Error('Shell-command voice macros are not supported on macOS.')
 
     // Replace an existing macro with the same trigger
     const trig = normalizeTrigger(parsed.trigger)
@@ -386,6 +388,7 @@ export class MacroService {
   // Execution
 
   public async run(macro: Macro, hooks: MacroRunHooks): Promise<string[]> {
+    if (isMac && macro.actions.some(a => a.type === 'command')) return ['This macro contains a shell command, which is unsupported on macOS. No actions were run.']
     const results: string[] = []
     const cwd = process.env.USERPROFILE || process.cwd()
     for (const a of macro.actions) {
@@ -427,6 +430,7 @@ export class MacroService {
             await new Promise((r) => setTimeout(r, (a.seconds || 1) * 1000))
             break
           case 'command': {
+            if (isMac) throw new Error('Shell-command voice macros are not supported on macOS.')
             const r = await ToolExecutor.execute('run_command', { command: a.command }, cwd)
             results.push(`$ ${a.command}: ${r.success ? 'ok' : r.output}`)
             break

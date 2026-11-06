@@ -53,6 +53,9 @@ function openWithin(constraints: MediaStreamConstraints): Promise<MediaStream> {
   })
 }
 
+export async function openDefaultMicrophone(audio: MediaTrackConstraints = {}): Promise<MediaStream> {
+  return openWithin({audio:{...audio,deviceId:'default'},video:false})
+}
 export async function openMicrophone(audio: MediaTrackConstraints = {}): Promise<MediaStream> {
   const saved = getSavedMic()
   if (saved) {

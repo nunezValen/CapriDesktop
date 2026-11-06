@@ -1,3 +1,4 @@
+import { MacSettings } from '../components/MacSettings'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Download, X, ChevronRight, ChevronLeft, Mic, Film, Cpu, Brain, Sparkles } from 'lucide-react'
 import type { SetupStatus } from '../../../preload/index.d'
@@ -56,6 +57,7 @@ const PageHead: React.FC<{ index: number; tag: string; title: string; sub?: stri
 )
 
 export const OnboardingView: React.FC = () => {
+  const isMac = navigator.platform.toLowerCase().includes('mac')
   const initialLang = toUiLang(navigator.language)
   const [lang, setLang] = useState<UiLang>(initialLang)
   const [langChoice, setLangChoice] = useState<string>(initialLang)
@@ -154,6 +156,7 @@ export const OnboardingView: React.FC = () => {
   const installAll = async () => {
     for (const step of order) {
       if (isReady(step, status)) continue
+      if ((await window.api.platform.status()).platform === 'darwin' && (step === 'model' || step === 'persona')) continue
       const ok = await runStep(step)
       // The model and persona need Ollama; stop the chain if a prerequisite failed
       if (!ok && (step === 'ollama' || step === 'model')) break
@@ -171,7 +174,7 @@ export const OnboardingView: React.FC = () => {
   return (
     <div className="cp-vars cp-root w-screen h-screen overflow-hidden flex flex-col select-none">
       {/* Top bar (window drag area) */}
-      <div className="h-11 shrink-0 flex items-center justify-between px-6" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+      <div className="h-11 shrink-0 flex items-center justify-between px-6" style={{ WebkitAppRegion: 'drag', ...(isMac ? {paddingLeft:90} : {}) } as React.CSSProperties}>
         <div className="flex items-baseline gap-3">
           <span className="cp-title text-[17px] text-[var(--cp-red)]">Capri</span>
           <span className="cp-label">// setup</span>
@@ -289,6 +292,7 @@ export const OnboardingView: React.FC = () => {
             )}
             <PageHead index={3} tag={t(PAGE_TAGS[3])} title={t('ob_setupTitle')} sub={provider === 'cloud' ? t('ob_setupSubCloud') : t('ob_setupSub')} />
 
+            <MacSettings />
             <div className="flex items-center gap-3">
               <span className="cp-label shrink-0">
                 {t('ob_synced')} {readyCount}/{order.length}
@@ -313,7 +317,7 @@ export const OnboardingView: React.FC = () => {
                       <span className={ready ? 'text-[var(--cp-cyan)]' : isRunning ? 'text-[var(--cp-yellow)]' : 'text-[var(--cp-red-dim)]'}>{STEP_ICONS[step]}</span>
                       <div className="flex-1 min-w-0">
                         <div className={`text-[15px] font-bold uppercase tracking-[0.08em] ${ready ? 'text-[var(--cp-text)]' : 'text-[var(--cp-red)]'}`}>{t(title)}</div>
-                        <div className="cp-mono text-[11px] text-[var(--cp-muted)] truncate">{t(desc)}</div>
+                        <div className="cp-mono text-[11px] text-[var(--cp-muted)] truncate">{step === 'model' && status?.recommendedModel ? status.recommendedModel : t(desc)}</div>
                       </div>
                       {ready ? (
                         <span className="cp-mono flex items-center gap-1.5 text-[12px] uppercase tracking-widest text-[var(--cp-cyan)]">

@@ -1,3 +1,4 @@
+import { isMac } from '../../../platform'
 /**
  * League of Legends adapter for Riot's official Live Client Data API (https://127.0.0.1:2999).
  * Read-only: no input automation, memory reading or process manipulation.
@@ -94,6 +95,7 @@ export class LolLiveAdapter extends EventEmitter implements GameAdapter {
    * Starts polling the in-game Live Client Data API
    */
   public async start(): Promise<void> {
+    if (isMac) return
     if (this.running) return
     this.running = true
     this.lastEventId = -1

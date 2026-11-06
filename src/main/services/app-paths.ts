@@ -7,7 +7,7 @@ import { storageDir } from './storage-location'
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
-import { isWindows } from './platform'
+import { isMac, isWindows, findOnPath } from './platform'
 
 /** Root that contains scripts/ and assets/ */
 export function resourceRoot(): string {
@@ -24,7 +24,7 @@ export function assetPath(...parts: string[]): string {
 
 /** Python virtual environment created by the first-run setup (installed app) or the repo .venv (dev) */
 export function pythonEnvDir(): string {
-  return app.isPackaged ? storageDir('python-env') || path.join(app.getPath('userData'), 'python-env') : path.join(app.getAppPath(), '.venv')
+  return app.isPackaged || isMac ? storageDir('python-env') || path.join(app.getPath('userData'), 'python-env') : path.join(app.getAppPath(), '.venv')
 }
 
 /** Where a virtual environment keeps its Python */
@@ -35,7 +35,7 @@ export function venvPython(): string {
 export function pythonPath(): string {
   const venv = venvPython()
   if (fs.existsSync(venv)) return venv
-  return isWindows ? 'python' : 'python3'
+  return isMac ? findOnPath('python3.11') || '/opt/homebrew/opt/python@3.11/bin/python3.11' : isWindows ? 'python' : 'python3'
 }
 
 /**
@@ -43,7 +43,7 @@ export function pythonPath(): string {
  * (seeded from the bundled defaults on first use), assets/capri_voice in development.
  */
 export function voiceDataDir(): string {
-  if (!app.isPackaged) return assetPath('capri_voice')
+  if (!app.isPackaged && !isMac) return assetPath('capri_voice')
   const dir = path.join(app.getPath('userData'), 'capri_voice')
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
   const cfg = path.join(dir, 'voice_config.json')
@@ -66,6 +66,7 @@ export function toolsDir(): string {
 
 /** FFmpeg extracted by the setup into toolsDir()/ffmpeg/<build>, if present */
 export function localFfmpegPath(): string | null {
+  if (isMac) return findOnPath('ffmpeg')
   const root = path.join(toolsDir(), 'ffmpeg')
   try {
     for (const build of fs.readdirSync(root)) {
@@ -81,4 +82,9 @@ export function localFfmpegPath(): string | null {
 /** Optional .env with API keys (repo root in development, user data folder when installed) */
 export function envFilePath(): string {
   return app.isPackaged ? path.join(app.getPath('userData'), '.env') : path.join(app.getAppPath(), '.env')
+}
+
+/** Keep Mac speech caches consistent with optional relocated requirements. */
+export function speechModelsDir(): string {
+  return storageDir('whisper') || path.join(app.getPath('userData'),'speech-models')
 }

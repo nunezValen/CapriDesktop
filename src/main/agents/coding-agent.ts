@@ -1,5 +1,5 @@
 import { homedir } from 'os'
-import { isWindows } from '../services/platform'
+import { isMac, isWindows } from '../services/platform'
 import { llmFetch } from '../services/llm-gateway'
 import { llmBody } from '../services/user-profile'
 /**
@@ -204,7 +204,7 @@ export class CodingAgent {
   private systemPrompt(desktop: string): string {
     const language = this.es() ? 'Spanish (Rioplatense, natural)' : 'English'
     return [
-      `You are an expert senior software engineer working autonomously on the user's ${isWindows ? 'Windows' : 'Linux'} PC.`,
+      `You are an expert senior software engineer working autonomously on the user's ${isWindows ? 'Windows' : isMac ? 'macOS' : 'Linux'} PC.`,
       'You build complete, working, good-looking projects end to end. No placeholders, no "TODO", no lorem ipsum unless asked: write real, polished content.',
       `The project will be created in a new folder on the Desktop (${desktop}). All file paths you write are RELATIVE to that project folder.`,
       'Default stack for web pages: plain HTML + CSS + vanilla JavaScript, no build step, no npm, no external CDNs unless clearly useful (Google Fonts is fine).',

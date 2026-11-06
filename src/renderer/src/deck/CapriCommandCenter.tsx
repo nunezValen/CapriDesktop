@@ -98,7 +98,7 @@ export const CapriCommandCenter: React.FC = () => {
          ========================================================================= */}
       <div className="relative z-10 w-full h-full flex flex-col">
         {/* Netwatch Style Top Sub-Bar */}
-        <div className="h-8 bg-black/60 border-b border-[#311718] px-3 flex items-center justify-between text-[13px] text-stone-300 backdrop-blur-md shrink-0">
+        <div className="cp-deck-chatbar h-8 bg-black/60 border-b border-[#311718] px-3 flex items-center justify-between text-[13px] text-stone-300 backdrop-blur-md shrink-0">
           <div className="flex items-center gap-2">
             <span
               className={`w-2 h-2 rounded-none ${
@@ -132,6 +132,7 @@ export const CapriCommandCenter: React.FC = () => {
               <span className="text-stone-500 text-[11px]">{t('cc_backdrop')}:</span>
               <button
                 onClick={() => setBgDimLevel('low')}
+                aria-pressed={bgDimLevel === 'low'}
                 className={`px-1.5 py-0.2 rounded-none text-[11px] transition-colors ${
                   bgDimLevel === 'low'
                     ? 'bg-cp-600/40 text-cp-300 font-bold border border-cp-500/50'
@@ -143,6 +144,7 @@ export const CapriCommandCenter: React.FC = () => {
               </button>
               <button
                 onClick={() => setBgDimLevel('medium')}
+                aria-pressed={bgDimLevel === 'medium'}
                 className={`px-1.5 py-0.2 rounded-none text-[11px] transition-colors ${
                   bgDimLevel === 'medium'
                     ? 'bg-cp-600/40 text-cp-300 font-bold border border-cp-500/50'
@@ -154,6 +156,7 @@ export const CapriCommandCenter: React.FC = () => {
               </button>
               <button
                 onClick={() => setBgDimLevel('high')}
+                aria-pressed={bgDimLevel === 'high'}
                 className={`px-1.5 py-0.2 rounded-none text-[11px] transition-colors ${
                   bgDimLevel === 'high'
                     ? 'bg-cp-600/40 text-cp-300 font-bold border border-cp-500/50'

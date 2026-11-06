@@ -1,3 +1,4 @@
+import { updateDelivery } from '../../shared/platform-policy'
 /**
  * Self-update and patch scripts.
  *
@@ -15,7 +16,7 @@ import * as path from 'path'
 import { spawn } from './hidden-process'
 import { app, shell } from 'electron'
 import { resourceRoot } from './app-paths'
-import { isLinux } from './platform'
+import { isMac, isLinux } from './platform'
 import { installDeb, linuxInstallKind, restartAfterUpdate, unpackNextToApp } from './linux-update'
 import { startIndependently, windowsUpdateScript } from './windows-update'
 import { localizeLine } from '../../shared/lines'
@@ -172,7 +173,7 @@ class UpdateService {
         return
       }
 
-      if (!app.isPackaged) {
+      if (updateDelivery(process.platform, app.isPackaged, !!process.env.APPIMAGE) === 'source') {
         await sayAfterIntro(
           es
             ? `[excited] Hay una versión nueva, la ${latest}. [curious] Pero estoy corriendo desde el código: hacé git pull y reiniciame.`
@@ -181,6 +182,11 @@ class UpdateService {
         return
       }
 
+      if (isMac && updateDelivery(process.platform, app.isPackaged, !!process.env.APPIMAGE) === 'release-page') {
+        await sayAfterIntro(`Version ${latest} is available. Opening the release page for a manual Mac update.`)
+        await shell.openExternal('https://github.com/nunezValen/CapriDesktop/releases/latest')
+        return
+      }
       const assets = release.assets || []
       const appImage = isLinux && !!process.env.APPIMAGE
       const linuxInstall = isLinux && !appImage ? await linuxInstallKind(process.execPath) : null

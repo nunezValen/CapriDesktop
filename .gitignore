@@ -89,3 +89,7 @@ assets/game_data/cyberpunk_mod/commands.json
 
 # Drawings Capri learns at runtime (personal)
 assets/game_data/learned_drawings/*.json
+
+# macOS build and verification artifacts
+scripts/macos/bin/
+work/

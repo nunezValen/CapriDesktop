@@ -1,6 +1,6 @@
 {
   "name": "capridesktop",
-  "version": "1.0.4",
+  "version": "1.0.4-mac.15",
   "type": "module",
   "description": "Capri, a cyberpunk desktop companion that lives on your screen: voice chat with a local LLM, game commentary (League of Legends, Cyberpunk 2077), voice macros and a coding agent.",
   "main": "./out/main/index.js",
@@ -20,7 +20,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux"
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "build:mac-helper": "node scripts/build-mac-helper.mjs",
+    "dist:mac": "npm run build:mac-helper && electron-vite build && electron-builder --mac --arm64",
+    "test:mac": "node tests/run.mjs"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

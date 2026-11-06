@@ -65,6 +65,7 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
 
   return (
     <div
+      data-capri-ui="true"
       className={`relative z-40 w-full ${compact ? 'max-w-[320px]' : 'max-w-[380px]'} mx-auto animate-fade-in font-terminal select-text pt-1`}
       style={{
         WebkitAppRegion: 'no-drag'
@@ -177,7 +178,7 @@ export const SpeechBubble: React.FC<SpeechBubbleProps> = ({
 
                 {/* AI Dialogue text */}
                 {displayText && (
-                  <div className={`${compact ? 'text-[11px] leading-tight' : 'text-[12px] leading-snug'} text-[#f8fafc] font-normal tracking-wide break-words`}>
+                  <div className={`${compact ? 'text-[11px] leading-tight' : 'text-[12px] leading-snug'} text-[#f8fafc] font-normal tracking-wide break-words max-h-[180px] overflow-y-auto overscroll-contain`}>
                     {displayText}
                     <span
                       className="inline-block w-1.5 h-3.5 ml-1 bg-[#00f0ff] align-middle shadow-[0_0_6px_#00f0ff]"

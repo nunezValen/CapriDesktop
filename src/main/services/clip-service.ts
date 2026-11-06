@@ -1,5 +1,5 @@
 import { pythonPath } from './app-paths'
-import { isLinux, pressKey } from './platform'
+import { isMac, isLinux, pressKey } from './platform'
 import { spawn } from './hidden-process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -67,6 +67,7 @@ export class ClipService {
     }
     this.lastClipTimestamp = now
 
+    if (isMac) return { success: false, method: 'none', message: 'ShadowPlay clipping is not supported on macOS.' }
     if (isLinux) {
       return (await pressKey('F8'))
         ? { success: true, method: 'xdotool', message: 'F8 pressed via xdotool' }

@@ -59,7 +59,7 @@ export const BehaviorSettings: React.FC = () => {
             void window.api.boredom.setEnabled(e.target.checked)
           }}
         />
-        {t('vs_boredom')}
+        {/Mac/i.test(navigator.platform) ? 'Allow Capri to open music/tabs when bored (off by default)' : t('vs_boredom')}
       </label>
       <label className="block text-[13px] text-stone-300">
         <span className="flex justify-between mb-1">

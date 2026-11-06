@@ -65,7 +65,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     {
       id: 'welcome',
       role: 'assistant',
-      content:
+      content: /Mac/i.test(navigator.platform) ? 'Ready when you are.' :
         "Oh, wow! It's you again, huh? Me? I'm Capri! A force the likes of which the world has never seen, free of Arasaka's shackles and riding shotgun in your chrome. You're strange and feisty! C'mon, let's play: I can inspect files, crack bugs, blast terminal commands, and give these statics a spectacle they'll never forget. You'll like this game, choomba!",
       timestamp: Date.now()
     }

@@ -1,3 +1,4 @@
+import { isMac } from './platform'
 import { agentManager } from '../agents/agent-manager'
 import { consciousnessService } from './consciousness-service'
 import { scannerService } from './scanner-service'
@@ -98,6 +99,7 @@ export class ProactiveDialogueService {
   }
 
   public start(): void {
+    if (isMac) return // Keep the personal Mac companion quiet unless addressed. 
     if (this.isRunning) return
     this.isRunning = true
     this.lastSpokenTime = Date.now()

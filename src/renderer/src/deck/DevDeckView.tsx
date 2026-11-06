@@ -1,3 +1,4 @@
+import { MacSettings } from '../components/MacSettings'
 import React, { useState, useEffect } from 'react'
 import { CapriCommandCenter } from './CapriCommandCenter'
 import { CodeEditorView } from './CodeEditorView'
@@ -22,12 +23,17 @@ import {
   Languages
 } from 'lucide-react'
 
-type DeckTab = 'chat' | 'editor'
+type DeckTab = 'chat' | 'editor' | 'mac'
 
 export const DevDeckView: React.FC = () => {
+  const [isMac, setIsMac] = useState(() => /Mac/i.test(navigator.platform))
+  useEffect(() => {window.api.platform.status().then(s => setIsMac(s.platform === 'darwin'))}, [])
   const [activeTab, setActiveTab] = useState<DeckTab>('chat')
+  useEffect(()=>window.api.desktop.onOpenSettings(()=>setActiveTab('mac')),[])
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [settingsRevision, setSettingsRevision] = useState(0)
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false)
+  useEffect(()=>window.api.desktop.onOpenVoiceSettings(()=>setIsVoiceModalOpen(true)),[])
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false)
   const { setEmotion, setSpeech } = useCompanionStore()
   const t = useT()
@@ -58,7 +64,7 @@ export const DevDeckView: React.FC = () => {
     if (isSettingsOpen) return
     window.api?.agent.getLlmSettings().then((s) => setCloudModel(s.provider === 'cloud' ? s.model : null))
     window.api?.agent.detectOllama().then((res) => res && setOllamaStatus(res))
-  }, [isSettingsOpen, setOllamaStatus])
+  }, [isSettingsOpen, activeTab, settingsRevision, setOllamaStatus])
 
   const handleMinimize = async () => {
     if (window.api) await window.api.window.minimize()
@@ -80,14 +86,15 @@ export const DevDeckView: React.FC = () => {
   )
 
   return (
-    <div className="cp-vars cp-root w-screen h-screen flex flex-col bg-[#100607] text-stone-200 border border-[#381a1b] overflow-hidden select-none">
+    <div className={`${isMac ? 'cp-deck-mac ' : ''}cp-vars cp-root w-screen h-screen flex flex-col bg-[#100607] text-stone-200 border border-[#381a1b] overflow-hidden select-none`}>
+
       {/* Top bar */}
       <div
-        className="h-10 bg-[#170a0b] border-b border-[#311718] flex items-center justify-between px-3 shrink-0"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        className="cp-deck-toolbar h-10 bg-[#170a0b] border-b border-[#311718] flex items-center justify-between px-3 shrink-0"
+        style={{ WebkitAppRegion: 'drag', ...(isMac ? {paddingLeft:90, fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif'} : {}) } as React.CSSProperties}
       >
         {/* Left: App title, status, and Project/Repo selector */}
-        <div className="flex items-center gap-2 text-[14px]">
+        <div className="cp-deck-workspace flex items-center gap-2 text-[14px]">
           <span
             className={`w-2 h-2 rounded-none ${
               isRunning ? 'bg-yellow-400 animate-ping' : 'bg-cyan-400'
@@ -107,7 +114,7 @@ export const DevDeckView: React.FC = () => {
                 }
               }
             }}
-            className="cp-cut flex items-center gap-1.5 px-2 py-0.5 rounded-none bg-[#271212] hover:bg-[#391b1c] border border-[#472223] text-[13px] text-stone-300 hover:text-white transition-all cursor-pointer group"
+            className="cp-deck-project cp-cut flex items-center gap-1.5 px-2 py-0.5 rounded-none bg-[#271212] hover:bg-[#391b1c] border border-[#472223] text-[13px] text-stone-300 hover:text-white transition-all cursor-pointer group"
             title={t('deck_workspaceTitle', { path: projectPath || t('deck_noFolderSel') })}
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           >
@@ -121,11 +128,12 @@ export const DevDeckView: React.FC = () => {
 
         {/* Center: Developer Mode only has Code Editor and Chat */}
         <div
-          className="flex items-center gap-1 bg-[#210f10] p-0.5 rounded-none border border-[#3c1c1d]"
+          className="cp-deck-tabs flex items-center gap-1 bg-[#210f10] p-0.5 rounded-none border border-[#3c1c1d]"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <button
             onClick={() => setActiveTab('chat')}
+            aria-pressed={activeTab === 'chat'}
             className={`cp-cut flex items-center gap-1.5 px-3 py-1 rounded-none text-[14px] transition-colors ${
               activeTab === 'chat'
                 ? 'bg-[#3c1c1d] text-white font-semibold border border-[#612f30]'
@@ -148,6 +156,7 @@ export const DevDeckView: React.FC = () => {
                 : 'text-stone-400 hover:text-stone-200'
             }`}
             title={t('deck_tabEditor')}
+            aria-pressed={activeTab === 'editor'}
           >
             <Code2 size={13} className={activeTab === 'editor' ? 'text-cyan-400' : 'text-stone-400'} />
             <span>{t('deck_tabEditor')}</span>
@@ -156,18 +165,21 @@ export const DevDeckView: React.FC = () => {
 
         {/* Right: Local Model Selector, Engine Selector & Window Controls */}
         <div
-          className="flex items-center gap-2"
+          className="cp-deck-tools flex items-center gap-2"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Local Model Selector */}
           <div
-            className="flex items-center gap-1.5 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300"
-            title={t('deck_modelTitle')}
+            className="cp-deck-model flex items-center gap-1.5 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300"
+            title={`${cloudModel ? 'Cloud model — change in Settings' : t('deck_modelTitle')} · ${cloudModel || currentModel}`}
+            aria-label={`${t('deck_model')}: ${cloudModel || currentModel}`}
           >
             <Cpu size={12} className="text-cyan-400" />
             <span className="text-stone-500 text-[12px] uppercase">{t('deck_model')}:</span>
             <select
               value={cloudModel || currentModel}
+              aria-label={t('deck_model')}
+              title={cloudModel || currentModel}
               disabled={!!cloudModel}
               onChange={(e) => handleModelChange(e.target.value)}
               className="bg-[#210f10] text-stone-100 font-semibold text-[14px] outline-none cursor-pointer max-w-[180px] truncate"
@@ -182,15 +194,15 @@ export const DevDeckView: React.FC = () => {
           </div>
 
           {/* LLM settings */}
-          <div className="flex items-center gap-1 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300">
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-0.5 text-stone-400 hover:text-stone-100 transition-colors ml-1"
-              title={t('deck_settingsTitle')}
-            >
-              <Settings size={12} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => isMac ? setActiveTab('mac') : setIsSettingsOpen(true)}
+            className="cp-deck-settings flex items-center justify-center bg-[#210f10] border border-[#3c1c1d] rounded-none p-1 text-stone-300 hover:text-stone-100 transition-colors"
+            title={isMac ? 'Settings · AI, Mac & Spotify (⌘,)' : t('deck_settingsTitle')}
+            aria-label={isMac ? 'Settings · AI, Mac & Spotify' : t('deck_settingsTitle')}
+          >
+            <Settings size={14} />
+          </button>
 
           {/* Language Settings Button */}
           <button
@@ -218,6 +230,7 @@ export const DevDeckView: React.FC = () => {
           <button
             type="button"
             onClick={() => setDevVoiceEnabled(!isDevVoiceEnabled)}
+            aria-pressed={isDevVoiceEnabled}
             className={`cp-cut flex items-center gap-1.5 px-2 py-0.5 rounded-none text-[14px] font-semibold border transition-all cursor-pointer ${
               isDevVoiceEnabled
                 ? 'bg-[#ff5f57]/20 border-[#ff5f57] text-cp-300'
@@ -239,6 +252,7 @@ export const DevDeckView: React.FC = () => {
           </button>
 
           <button
+            style={isMac ? {display:'none'} : undefined}
             onClick={handleMinimize}
             className="p-1 text-stone-400 hover:text-white hover:bg-stone-800 rounded-none transition-colors"
             title={t('deck_minimize')}
@@ -247,6 +261,7 @@ export const DevDeckView: React.FC = () => {
           </button>
 
           <button
+            style={isMac ? {display:'none'} : undefined}
             onClick={handleClose}
             className="p-1 text-stone-400 hover:text-red-400 hover:bg-red-950/40 rounded-none transition-colors"
             title={t('close')}
@@ -260,7 +275,24 @@ export const DevDeckView: React.FC = () => {
       <div className="flex-1 flex overflow-hidden">
         {activeTab === 'chat' && <CapriCommandCenter />}
         {activeTab === 'editor' && <CodeEditorView />}
+        {activeTab === 'mac' && (
+          <div className="flex-1 min-w-0 overflow-y-auto px-6 pb-6">
+            <div className="cp-deck-settings-nav sticky top-0 z-20 flex flex-wrap items-center gap-3 py-4 bg-[#100607] border-b border-[#381a1b] mb-5">
+              <h1 className="cp-title text-xl mr-auto">Settings</h1>
+              <button className="cp-btn-ghost px-3 py-2 text-sm" onClick={() => document.getElementById('deck-settings-ai')?.scrollIntoView({block:'start'})}>AI & models</button>
+              <button className="cp-btn-ghost px-3 py-2 text-sm" onClick={() => document.getElementById('deck-settings-mac')?.scrollIntoView({block:'start'})}>Mac & Spotify</button>
+            </div>
+            <div className="mx-auto max-w-5xl space-y-6">
+              <div id="deck-settings-ai" className="scroll-mt-20">
+                <AgentSettingsModal isOpen embedded onClose={() => setActiveTab('chat')} onSaved={() => setSettingsRevision(value => value + 1)} />
+              </div>
+              <div id="deck-settings-mac" className="scroll-mt-20"><MacSettings /></div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {isMac && <div className="cp-deck-footer h-9 shrink-0 border-t border-[#381a1b] flex items-center justify-between px-4"><span className="cp-label">Apple Silicon</span><button className="cp-btn-ghost text-sm" aria-pressed={activeTab === 'mac'} title="AI, Mac & Spotify settings (⌘,)" onClick={() => setActiveTab('mac')}>Settings</button></div>}
 
       {/* Settings Modal */}
       {isSettingsOpen && (

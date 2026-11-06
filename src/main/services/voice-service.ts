@@ -1,13 +1,14 @@
 import { storageDir } from './storage-location'
 import { detectLanguage } from './language-detect'
 import { isCloudMode, llmFetch } from './llm-gateway'
-import { envFilePath, localFfmpegPath, pythonPath, scriptPath, voiceDataDir } from './app-paths'
+import { speechModelsDir, envFilePath, localFfmpegPath, pythonPath, scriptPath, voiceDataDir } from './app-paths'
 import { spawn, ChildProcess } from 'child_process'
 import { stripLookTags } from './script/look-tags'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { app } from 'electron'
+import { isMac } from './platform'
 import { consciousnessService } from './consciousness-service'
 import { ollamaService } from './ollama-service'
 function loadEnv(): void {
@@ -86,6 +87,7 @@ export class VoiceService {
   /** Tells capri_voice.py where the (writable) voice config, keys and audio cache live */
   private pythonEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUTF8: '1', CAPRI_VOICE_DIR: voiceDataDir(), CAPRI_ENV_FILE: envFilePath(), PYTHONIOENCODING: 'utf-8' }
+    if (isMac) env.CAPRI_WHISPER_DIR = speechModelsDir()
     const ffmpeg = localFfmpegPath()
     if (ffmpeg && !env.CAPRI_FFMPEG) env.CAPRI_FFMPEG = ffmpeg
     // Whisper's model weighs about 500 MB
@@ -120,6 +122,7 @@ export class VoiceService {
       })
       this.sttWorker = worker
 
+      this.sttWorker.stdin?.on('error', err => this.drainQueueWithError(err.message))
       this.sttWorker.stdout?.on('data', (chunk) => {
         this.workerLineBuffer += chunk.toString()
         const lines = this.workerLineBuffer.split('\n')
@@ -295,6 +298,8 @@ export class VoiceService {
           env: this.pythonEnv()
         })
 
+        proc.once('error', err => resolve({success: false, error: `Voice engine could not start: ${err.message}. Run setup to install Python and voice dependencies.`}))
+
         let stdout = ''
         let stderr = ''
 
@@ -429,6 +434,8 @@ export class VoiceService {
           windowsHide: true,
           env: this.pythonEnv()
         })
+
+        proc.once('error', err => resolve({success: false, error: `Voice engine could not start: ${err.message}. Run setup to install Python and voice dependencies.`}))
 
         let stdout = ''
         let stderr = ''

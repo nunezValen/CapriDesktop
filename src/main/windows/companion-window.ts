@@ -1,3 +1,4 @@
+import { isMac } from '../services/platform'
 import { assetPath } from '../services/app-paths'
 import { BrowserWindow, screen, app } from 'electron'
 import { join } from 'path'
@@ -16,6 +17,7 @@ export function createCompanionWindow(): BrowserWindow {
 
   const companionWindow = new BrowserWindow({
     title: 'Capricorn // Capri Desktop',
+    ...(isMac ? { type: 'panel' } : {}),
     icon: iconPath,
     width,
     height,

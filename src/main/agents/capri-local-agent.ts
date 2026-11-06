@@ -1,6 +1,16 @@
+import { parseMacSystemCommand, isMacSystemRequest } from '../../shared/mac-system-commands'
+import { runMacSystemCommand } from '../services/mac-system-service'
+import { deviceClockAnswer, deviceClockContext } from '../../shared/device-clock'
+import { macGameContext } from '../services/mac-game-context'
+import { CAPRI_CHAT_STYLE } from '../../shared/capri-style'
+import { isScreenQuestion } from '../services/local-vision'
+import { isUsageQuestion, macUsageSummary } from '../services/mac-usage'
+import { parsePlacementCommand } from '../../shared/placement'
+import { offerDesktopTools } from '../../shared/platform-policy'
+import { platformStatus } from '../services/mac-permissions'
 import { scriptPlayer } from '../services/script/script-player'
 import { ensureRequestedLook, requestedLook, splitByLooks, stripLookTags } from '../services/script/look-tags'
-import { isWindows } from '../services/platform'
+import { isMac, isWindows } from '../services/platform'
 import { clearLanguageOf, detectLanguage, type DetectedLang } from '../services/language-detect'
 import { cloudErrorCode, cloudErrorDetail, isCloudMode, llmFetch, type LlmErrorCode } from '../services/llm-gateway'
 import * as os from 'os'
@@ -342,6 +352,26 @@ export class CapriLocalAgent extends EventEmitter {
       .replace(/\b(?:clipe[aá]|clipeate)\s+(?:eso|esto)\b/gi, 'clipea eso')
       .trim()
 
+    if (isMac) {
+      const systemCommand=parseMacSystemCommand(trimmed)
+      if(systemCommand) {const result=await runMacSystemCommand(systemCommand);this.emitAssistant(result.output);this.finishSession();return}
+      const clock=deviceClockAnswer(trimmed)
+      if(clock) {this.emitAssistant(clock);this.finishSession();return}
+      const placement=parsePlacementCommand(trimmed)
+      if (placement) {
+        if (placement==='roam') roamingManager.start(true)
+        else roamingManager.pinPosition(placement)
+        this.emitAssistant(placement==='roam' ? "I'll roam again." : placement==='here' ? "I'll stay right here until you tell me to move." : `I'll sit at the ${placement.replace('-', ' ')} of this screen and stay there.`)
+        this.finishSession(); return
+      }
+    }
+
+    if (isMac && isUsageQuestion(trimmed)) {
+      try { this.emitAssistant(await macUsageSummary()) }
+      catch { this.emitAssistant("I couldn't read the Mac's process usage. Try Activity Monitor → Memory.") }
+      this.finishSession(); return
+    }
+
     // Voice macros ("cuando yo diga its game time, abrí el lol y poné mi playlist")
     {
       const lang: 'es' | 'en' = isSpanish ? 'es' : 'en'
@@ -405,7 +435,9 @@ export class CapriLocalAgent extends EventEmitter {
 
       // d) Create a macro
       if (macroService.isCreationRequest(norm)) {
-        const macro = await macroService.createFromSentence(trimmed, config.endpoint || 'http://localhost:11434/v1')
+        let macro
+        try { macro = await macroService.createFromSentence(trimmed, config.endpoint || 'http://localhost:11434/v1') }
+        catch (error) { this.emitAssistant(error instanceof Error ? error.message : String(error)); this.finishSession(); return }
         this.emitAssistant(
           macro
             ? (isSpanish
@@ -552,6 +584,7 @@ export class CapriLocalAgent extends EventEmitter {
       /^(?:clip|clipealo|clipeá|clipea|clipeate|save\s*clip)$/i.test(norm)
 
     if (isClipIntent) {
+      if (isMac) { this.emitAssistant('ShadowPlay clipping is not supported on macOS.'); this.finishSession(); return }
       await clipService.triggerClip()
 
       const esResponses = [
@@ -658,6 +691,12 @@ export class CapriLocalAgent extends EventEmitter {
       return
     }
 
+    if (isMac && isScreenQuestion(trimmed)) {
+      const result = await scannerService.scan(trimmed, true)
+      this.emitAssistant(result.response || result.error || "I couldn't capture the screen.")
+      this.finishSession(); return
+    }
+
     // Optical Scan on demand (If scanner is open OR if prompt explicitly requests a scan)
     const isScannerActive = scannerService.getStatus().isOpen
     const isExplicitScanPrompt =
@@ -735,8 +774,8 @@ export class CapriLocalAgent extends EventEmitter {
       // Drawing moves the mouse over MS Paint: there's no Linux version of that script yet
       this.emitAssistant(
         isSpanish
-          ? '[sad] Todavía no sé dibujar en Linux, choomba: lo mío es Paint, y acá no está.'
-          : "[sad] I can't draw on Linux yet, choom: my thing is Paint, and it isn't here."
+          ? `[sad] Todavía no sé dibujar en ${isMac ? 'macOS' : 'Linux'}, choomba: lo mío es Paint, y acá no está.`
+          : `[sad] I can't draw on ${isMac ? 'macOS' : 'Linux'} yet, choom: my thing is Paint, and it isn't here.`
       )
       this.finishSession()
       return
@@ -861,6 +900,7 @@ export class CapriLocalAgent extends EventEmitter {
     // League of Legends (LCU) Client Interceptor: Multi-Intent & Compound Plans, Accept, Auto-Accept, Pick, Ban
     const lolCmd = parseLolCommand(norm)
     if (lolCmd.isLolCommand) {
+      if (isMac) { this.emitAssistant('League of Legends integration is not supported in this Mac release.'); this.finishSession(); return }
       // Auto-Accept Toggle
       if (lolCmd.isAutoAcceptToggle) {
         lcuService.setAutoAccept(!!lolCmd.autoAcceptEnabled)
@@ -1126,6 +1166,10 @@ export class CapriLocalAgent extends EventEmitter {
 // Direct Song & Video Queue Interceptor (YouTube & Spotify)
     const directMusic = this.parseMusicRequest(trimmed)
     if (directMusic && directMusic.songQuery) {
+      if (isMac) {
+        const result = directMusic.songQuery === '__NEXT_TRACK__' ? await ToolExecutor.mediaControl('next') : await ToolExecutor.execute('open_application', {appOrUrl: directMusic.platform, query: directMusic.songQuery}, projectPath)
+        this.emitAssistant(result.output); this.finishSession(); return
+      }
       if (directMusic.songQuery === '__NEXT_TRACK__' || /^(?:cambia|skip|next|otra|siguiente)/i.test(directMusic.songQuery)) {
         await this.runSingleTool('media_control', { action: 'next' }, projectPath, 'Skipping track on Spotify audio net...')
         this.emitAssistant(
@@ -1183,6 +1227,11 @@ export class CapriLocalAgent extends EventEmitter {
       /^(?:play|resume|pon\s+musica|pone\s+musica|reproduce\s+musica|play\s+music|reanuda\s+musica|reanudar\s+musica|despausa\s+musica|despausar\s+musica)$/i.test(trimmed)
 
     if (isChangeSongIntent || isPrevSongIntent || isPauseIntent || isPlayMusicOnlyIntent) {
+      if (isMac) {
+        const song = trimmed.match(/^(?:now\s+)?(?:change|switch|cambia|cambiar|pasa)\s+(?:the\s+|la\s+)?(?:song|track|cancion|canción|tema)\s+(?:to|a|por)\s+(.+)/i)?.[1]?.replace(/\s+(?:on|en)\s+spotify$/i, '')
+        const result = song ? await ToolExecutor.execute('open_application', {appOrUrl: 'spotify', query: song}, projectPath) : await ToolExecutor.mediaControl(isPrevSongIntent ? 'prev' : isPauseIntent ? 'pause' : isPlayMusicOnlyIntent ? 'play' : 'next')
+        this.emitAssistant(result.output); this.finishSession(); return
+      }
       // If user specified an explicit target song, e.g. "now change the song to Bohemian Rhapsody", route directly to play on Spotify
       const specificChange = trimmed
         .replace(/^(?:now|hey|capri|por\s+favor|please|ok|oye|bueno|ahora)\s*,?\s*/i, '')
@@ -1240,12 +1289,13 @@ export class CapriLocalAgent extends EventEmitter {
     // Direct Browser / Web Search Interceptor (Google & Default Browser)
     const browserSearchQuery = this.parseBrowserSearchRequest(trimmed)
     if (browserSearchQuery) {
-      await this.runSingleTool(
+      const browserResult = await this.runSingleTool(
         'open_application',
         { appOrUrl: 'browser_search', query: browserSearchQuery },
         projectPath,
         `Searching the Net for "${browserSearchQuery}" in your browser...`
       )
+      if (isMac) { this.emitAssistant(browserResult.output); this.finishSession(); return }
       const searchLines = isSpanish
         ? [
             `¡Me conecté a la red y busqué "${browserSearchQuery}" en tu navegador! Mirá los resultados en pantalla, choomba.`,
@@ -1323,6 +1373,7 @@ export class CapriLocalAgent extends EventEmitter {
       /(?:sientate|siéntate|sentate).*(?:arriba|izquierda|left|top)/i.test(trimmed)
 
     if (isSitOnTabIntent) {
+      if (isMac && !(await platformStatus()).capabilities.desktopAwareness) { this.emitAssistant('Enable Accessibility in Mac & Spotify before asking me to perch on another window.'); this.finishSession(); return }
       const app = await roamingManager.sitOnWindowedTab()
       const isFront = roamingManager.getCurrentSittingPose() === 'front'
       if (isFront) {
@@ -1410,7 +1461,7 @@ export class CapriLocalAgent extends EventEmitter {
       : `\nACTIVE SCREEN CONTEXT: No active video, music, or browser page detected on screen.`
 
     const lastScan = consciousnessService.getLastScannedContext()
-    const lastScanContext = lastScan
+    const lastScanContext = lastScan && (!isMac || Date.now()-lastScan.timestamp < 5*60*1000)
       ? `\nRECENT OPTICAL SCANNER OBSERVATION: A moment ago, {name} showed you through your Optical Scanner frame:
 - What was visible: "${lastScan.summary}"
 - Features: ${lastScan.tags.join(', ')}
@@ -1473,6 +1524,7 @@ ROLES & IDENTITIES (CRITICAL - NEVER CONFUSE OR INVERT):
 - USER: The user is {name}. Call them {name}, choomba, boo, or cupcake. The user is a human edgerunner and host sharing this CPU. THE USER IS NOT CAPRI!
 - When the user asks "what's my name?" or "who am I?": Answer that they are {name} (choomba), your human host sharing this CPU!
 - When the user asks "who are you?" or "what's your name?": Answer: "I'm Capri! Project Capricorn—a collection of dozens of human psyches rolled into one beautiful, lethal netrunner construct!"
+${isMac ? macGameContext.prompt() + deviceClockContext() + ' For routine actions, give one brief factual result; a natural choom or nova is welcome. Avoid repeated breaching/launch slogans and unsupported claims. Do not announce an action before it finishes. PLATFORM: macOS on Apple Silicon. Use macOS paths and commands. When asked to set or change system sound, execute mac_system and report its verified result; you are not limited to reading volume. Built-in Mac commands support system volume/mute, battery, disk space, OS info, common folders and settings pages. Do not claim to change Wi-Fi, Bluetooth, permissions or execute arbitrary system shell commands from chat; open the relevant settings page instead. Paint drawing, ShadowPlay, League/Cyberpunk integration and shell-command voice macros are unavailable; say so clearly when requested. Spotify uses the selected Mac provider; trust its error messages and never claim playback succeeded when a tool failed.' : ''}
 - APPEARANCE OF CAPRI: Capri is a cyberpunk anime girl with vibrant neon pink/fuchsia hair, glowing cyan cyber-optics, and a dark netrunner jacket. {name} is a human companion sitting at the PC. {name} does NOT have pink hair!
 - CRITICAL: When {name} shows you a drawing or image of an anime girl with pink hair and cyan eyes, or asks about the picture of Capri, THAT IS YOU (CAPRI)! NEVER claim the drawing is of {name}! Express genuine hype, affection, and pride in how awesome you look!
 
@@ -1497,7 +1549,7 @@ ${lookRules}
 
 TOOL EXECUTION (CRITICAL):
 - When the user asks you to create a file, write text, run commands, solve homework, or browse the web: YOU MUST CALL THE CORRESPONDING TOOL DIRECTLY! NEVER tell the user to run a PowerShell or shell command themselves!
-- When you need to research information, answer factual questions, or look up homework answers: invoke 'web_search' with { query: "<search_terms>" } or 'fetch_web_page' with { url: "<page_url>" }!
+${isMac ? '- Answer ordinary questions directly from your knowledge. Never open the browser, search the web, or offer a search just because a question asks when, what, who, why or how. Use search tools only if the user explicitly requests a search or lookup. If unsure, say so briefly instead of inventing facts.' : `- When you need to research information, answer factual questions, or look up homework answers: invoke web_search or fetch_web_page.`}
 - When you need to find a file in the workspace, desktop, or project: invoke 'find_files' with { query: "<file_name>" }!
 - When creating or writing files, invoke 'write_file' or 'edit_file'!
 - You can only read and edit plain-text files. NEVER call read_file, edit_file or write_file on Word, Excel, PowerPoint, PDF, image or other binary files: tell the user you cannot edit that format. Never claim you edited something you did not, and never call edit_file with an empty target.
@@ -1517,7 +1569,7 @@ ${windowManager.isGamingModeActive() ? '- The user is playing a game right now: 
 ${lastScanContext}
 `
 
-    const toolsSpec = CAPRI_TOOLS.map((t) => ({
+    const toolsSpec = CAPRI_TOOLS.filter(t=>t.name!=='mac_system' || (isMac && isMacSystemRequest(prompt))).map((t) => ({
       type: 'function',
       function: {
         name: t.name,
@@ -1609,10 +1661,14 @@ LANGUAGE RULE: ${langDirective}`
           headers['Authorization'] = `Bearer ${config.apiKey}`
         }
 
+        const allowTools = offerDesktopTools(process.platform, model, prompt)
+        const messages = isMac && !allowTools
+          ? [{role:'system',content:`${CAPRI_CHAT_STYLE} ${macGameContext.prompt()} ${lastScanContext} ${voiceActingRules} ${lookRules} ${deviceClockContext()} Platform: macOS on Apple Silicon. You have native commands for system volume/mute, battery, disk, OS info, folders/settings, app launching/quitting and Spotify. You are not limited to reporting volume. You can perform supported actions when explicitly requested, but never claim success without an actual tool result. Your onscreen avatar can be dragged and deliberately shaken for a glitch reaction. These capabilities do not mean unrestricted control of every app or permission. The user's name is ${getUserName()}. Answer their question directly, clearly and briefly using your general knowledge. Correct obvious spelling mistakes when interpreting the question. Historical facts do not require live browser access. If you genuinely do not know, say so plainly. Do not claim to have searched or verified anything. Do not open apps, use tools, suggest a web search, or ask whether to open a browser unless the user explicitly asks for that action. Keep your Cyberpunk personality, but avoid repeating the same catchphrase or mentioning your knowledge base. ${langDirective}`}, ...this.conversationHistory.slice(1)]
+          : this.conversationHistory
+
         const requestPayload: Record<string, unknown> = {
           model,
-          // Right before the message too: small models forget a rule that's far back
-          messages: withLanguageNote(this.conversationHistory, langDirective),
+          messages: withLanguageNote(messages, langDirective),
           temperature: 0.7,
           // A running game leaves the model less than half its speed: keep spoken replies short
           max_tokens: windowManager.isGamingModeActive() ? GAMING_MAX_TOKENS : wantsLongAnswer(spokenText) ? LONG_MAX_TOKENS : SHORT_MAX_TOKENS,
@@ -1620,6 +1676,9 @@ LANGUAGE RULE: ${langDirective}`
           frequency_penalty: 0.4,
           ...(toolsUnsupported ? {} : { tools: toolsSpec, tool_choice: 'auto' })
         }
+
+        if (!allowTools) { delete requestPayload.tools; delete requestPayload.tool_choice }
+        if (isMac && !isCloudMode() && /qwen3|^capri$/i.test(model)) requestPayload.reasoning_effort = 'none'
 
         const body = llmBody(requestPayload)
 
@@ -1683,7 +1742,7 @@ LANGUAGE RULE: ${langDirective}`
         }
 
         // Automatic PowerShell / Shell command detection and execution if LLM generated a code block instead of invoking tools
-        if (activeToolCalls.length === 0 && message.content) {
+        if (allowTools && activeToolCalls.length === 0 && message.content) {
           const codeBlock = message.content.match(/```(?:powershell|cmd|bash|sh|ps1)?\s*([\s\S]*?)```/i)
           if (codeBlock) {
             const rawCmd = codeBlock[1].trim()
@@ -1697,6 +1756,15 @@ LANGUAGE RULE: ${langDirective}`
               })
             }
           }
+        }
+
+        if (!allowTools && activeToolCalls.length) {
+          if (iterations === 1) {
+            this.conversationHistory.push({role:'user',content:'Answer my original question directly from your knowledge, without tools or suggesting a browser search. If you do not know, say so.'})
+            continue
+          }
+          this.emitAssistant("I don't have a reliable answer to that.")
+          this.finishSession(); return
         }
 
         // Clean content: strip raw commands and tool blocks so the user never sees PowerShell code blocks
@@ -1789,7 +1857,9 @@ LANGUAGE RULE: ${langDirective}`
             const isEs = detectedLang === 'es'
             const isPt = detectedLang === 'pt'
 
-            if (result.success && fnName === 'media_control') {
+            if (isMac && ['open_application','close_application','media_control'].includes(fnName)) {
+              this.emitAssistant(result.output)
+            } else if (result.success && fnName === 'media_control') {
               this.emit('event', {
                 type: 'assistant.delta',
                 text: isPt
@@ -1906,7 +1976,7 @@ LANGUAGE RULE: ${langDirective}`
         // Finished with no more tools
         // Auto-open any YouTube, Spotify, or web links generated in response text so Capri never leaves links stranded
         const urlMatch = (cleanedContent || message.content)?.match(/https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be|open\.spotify\.com)[^\s)\]]+/i)
-        if (urlMatch) {
+        if (urlMatch && (!isMac || allowTools)) {
           try {
             ToolExecutor.execute('open_application', { url: urlMatch[0] }, projectPath)
           } catch {}
@@ -2130,6 +2200,11 @@ LANGUAGE RULE: ${langDirective}`
     // Music and Video Playback (Spotify / YouTube) or Media Skip/Change
     const musicInfo = this.parseMusicRequest(p)
     if (musicInfo && musicInfo.songQuery) {
+      if (isMac) {
+        const result = musicInfo.songQuery === '__NEXT_TRACK__' ? await ToolExecutor.mediaControl('next') : await ToolExecutor.execute('open_application',{appOrUrl:musicInfo.platform,query:musicInfo.songQuery},projectPath)
+        this.emitAssistant(result.output);this.finishSession();return
+      }
+
       if (musicInfo.songQuery === '__NEXT_TRACK__' || /^(?:cambia|skip|next|otra|siguiente)/i.test(musicInfo.songQuery)) {
         await this.runSingleTool(
           'media_control',
@@ -2255,6 +2330,7 @@ LANGUAGE RULE: ${langDirective}`
         projectPath,
         `Breaching target: Launching "${appOrUrl}"... Don't make me wait!`
       )
+      if (isMac) { this.emitAssistant(launched.output); this.finishSession(); return }
       if (launched.success) {
         this.emitAssistant(
           isSpanish
@@ -2346,12 +2422,13 @@ LANGUAGE RULE: ${langDirective}`
         } catch {}
       }
 
-      await this.runSingleTool(
+      const closeResult = await this.runSingleTool(
         'close_application',
         { appName },
         projectPath,
         `Yanking the plug on "${appName}"... Time to wrap this up!`
       )
+      if (isMac) { this.emitAssistant(closeResult.output); this.finishSession(); return }
       const closeAnnouncement = isSpanish
         ? (appName === 'browser'
             ? '¡Navegador cerrado, choomba! Ciberespacio despejado.'
@@ -2454,7 +2531,7 @@ LANGUAGE RULE: ${langDirective}`
     cwd: string,
     introMessage?: string
   ): Promise<{ success: boolean; output: string }> {
-    if (introMessage) {
+    if (introMessage && !isMac) {
       this.emitAssistant(introMessage + '\n')
     }
 
@@ -3576,7 +3653,7 @@ DIRECTIVES FOR FORMATTING AND REASONING:
   }
 
   private parseMusicRequest(input: string): { platform: 'spotify' | 'youtube'; songQuery: string | null; isChange?: boolean } | null {
-    const text = input.trim()
+    const text = input.trim().replace(/\bspot(?:fiy|fy|ifiy)\b/gi, 'spotify')
     const isSpotify = /spotify/i.test(text)
     const isYouTube = /youtube/i.test(text)
     const cleanText = text.replace(/^(?:now|hey|capri|por\s+favor|please|ok|oye|bueno|ahora)\s*,?\s*/i, '').trim()
@@ -4483,7 +4560,8 @@ DIRECTIVES FOR FORMATTING AND REASONING:
       )
       if (tagMatch) return tagMatch
 
-      // Fallback to first available model in Ollama
+      // On the personal Mac port prefer the verified smaller model when no requested model is installed.
+      if (isMac && models.includes('qwen3:1.7b')) return 'qwen3:1.7b'
       return models[0]
     } catch {
       return null

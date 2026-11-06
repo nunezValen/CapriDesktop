@@ -1,3 +1,6 @@
+import { isMac } from './platform'
+import { macForegroundWindow } from './mac-desktop'
+import { macGameContext } from './mac-game-context'
 /**
  * Notices any game in the foreground, puts Capri in Gaming Mode and, every so often, has her
  * comment on that game. The foreground window comes from a PowerShell script on Windows and from
@@ -68,21 +71,32 @@ export class GamePresenceService {
   private nextCommentAt = 0
   private generating = false
   private recent: string[] = []
+  private polling = false
 
   public start(): void {
-    if (this.timer || (!isWindows && !isLinux)) return
-    this.timer = setInterval(() => void this.tick(), POLL_MS)
-    void this.tick()
+    if (this.timer || (!isWindows && !isLinux && !isMac)) return
+    const poll = async () => {
+      if (this.polling) return
+      this.polling = true
+      try {
+        if (isMac) macGameContext.update(await macForegroundWindow().catch(() => null))
+        else await this.tick()
+      } catch (error) { console.warn('[GamePresence] Foreground query failed:', error) }
+      finally { this.polling = false }
+    }
+    this.timer = setInterval(() => void poll(), isMac ? 5000 : POLL_MS)
+    void poll()
   }
 
   public stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    if (isMac) macGameContext.clear()
   }
 
   /** A game Capri has no in-match adapter for is open, even if it isn't the focused window */
   public isGameSessionActive(): boolean {
-    return !!this.game && isAlive(this.game.pid)
+    return isMac ? !!macGameContext.current()?.foreground : !!this.game && isAlive(this.game.pid)
   }
 
   private async tick(): Promise<void> {

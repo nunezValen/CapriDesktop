@@ -1,4 +1,7 @@
+import { runMacSystemCommand } from '../../services/mac-system-service'
+import type { MacSystemAction } from '../../../shared/mac-system-commands'
 import {
+  isMac,
   isLinux,
   isWindows,
   killProcesses,
@@ -23,6 +26,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { exec } from '../../services/hidden-process'
 import { app, shell } from 'electron'
+import { launchMacApp, quitMacApp } from '../../services/mac-desktop'
+import { spotifyService } from '../../services/spotify-service'
 import { clipService } from '../../services/clip-service'
 import { askWhereAppIs, openInstalledApp, protocolIsRegistered } from '../../services/app-launcher'
 import { cleanAppRequest } from '../../services/app-finder'
@@ -52,7 +57,17 @@ export interface ToolDefinition {
   }
 }
 
+export const MAC_SYSTEM_TOOL:ToolDefinition={
+  name:'mac_system',
+  description:'macOS only. Read battery/disk/OS info or system output volume; set/adjust output volume or mute/unmute; open a standard Finder folder or System Settings page. Execute requested sound changes with this tool instead of claiming read-only access. Does not alter Wi-Fi, Bluetooth, privacy grants, files or power state. Never use for Capri voice settings or coding examples.',
+  parameters:{type:'object',properties:{
+    action:{type:'string',description:'Native action to perform.',enum:['battery','storage','system-info','get-volume','set-volume','change-volume','mute','unmute','folder','settings']},
+    value:{type:'number',description:'For set-volume: 0–100 percent. For change-volume: signed adjustment, normally +/-10. Required for those two actions.'},
+    name:{type:'string',description:'For folder: downloads/documents/desktop/home. For settings: sound/display/displays/wifi/wi-fi/bluetooth/battery/keyboard/mouse/trackpad/accessibility/privacy/general.'}
+  },required:['action']}
+}
 export const CAPRI_TOOLS: ToolDefinition[] = [
+  ...(isMac ? [MAC_SYSTEM_TOOL] : []),
   {
     name: 'run_command',
     description: 'Execute a command in PowerShell / bash shell. Use for builds, tests, git, npm, or system inspection.',
@@ -360,6 +375,9 @@ export class ToolExecutor {
           return { success: true, output: lines.join('\n') || '(empty directory)' }
         }
 
+        case 'mac_system': {
+          return runMacSystemCommand(args as unknown as MacSystemAction)
+        }
         case 'open_application': {
           return await ToolExecutor.openApplication(args)
         }
@@ -634,6 +652,12 @@ export class ToolExecutor {
     }
 
     try {
+      // Named browsers must open that Mac app, not silently open the default browser.
+      if(isMac && /^(?:google chrome|chrome|firefox|safari|microsoft edge|edge|msedge|brave|brave browser|opera|opera gx|apple music)$/.test(target.replace(/\.exe$/i,''))) {
+        const url=rawUrl || (rawQuery ? `https://www.google.com/search?q=${encodeURIComponent(rawQuery)}` : undefined)
+        const ok=await launchMacApp(rawTarget,url)
+        return {success:ok,output:ok ? `Opened ${rawTarget}${rawQuery ? ` with search: ${rawQuery}` : ''}.` : `Could not find or open ${rawTarget} on this Mac.`}
+      }
       // Direct Web URLs
       if (/^https?:\/\//i.test(rawTarget)) {
         await shell.openExternal(rawTarget)
@@ -649,7 +673,7 @@ export class ToolExecutor {
       const handledBelow = /^(?:youtube|spotify|musica|música|music|cancion|canción|navegador|browser|browser_search|internet|google|notas|bloc de notas)$/i
       if (!rawUrl && !rawQuery && !handledBelow.test(cleanAppRequest(target))) {
         const opened = await openInstalledApp(rawTarget)
-        if (opened) return { success: true, output: `Launched ${opened} successfully!` }
+        if (opened) return { success: true, output: isMac ? `Opened ${opened}.` : `Launched ${opened} successfully!` }
       }
 
       // YouTube (with direct song / video search and playback)
@@ -683,6 +707,12 @@ export class ToolExecutor {
             ? `Playing "${query}" on YouTube: ${finalUrl}`
             : 'Launched YouTube in your browser.'
         }
+      }
+
+      if (isMac && !/spotify|musica|music|cancion|browser|chrome|opera|google|navegador/.test(target)) {
+        if (/league|cyberpunk|valorant|\blol\b/.test(target)) return {success: false, output: 'Game integrations are not supported in this Mac release.'}
+        const ok = await launchMacApp(rawTarget)
+        return ok ? {success:true,output:`Opened ${rawTarget}.`} : ToolExecutor.appNotFound(rawTarget,args)
       }
 
       // OBS Studio
@@ -771,6 +801,7 @@ export class ToolExecutor {
           return await ToolExecutor.mediaControl('next')
         }
 
+        if (isMac) return spotifyService.play(query)
         if (isLinux) return await ToolExecutor.linuxSpotify(query)
 
         const isChangeRequested =
@@ -948,6 +979,10 @@ export class ToolExecutor {
 
     const target = rawTarget.toLowerCase()
 
+    if (isMac) {
+      try { const ok = await quitMacApp(rawTarget); return {success: ok, output: ok ? `Asked ${rawTarget} to quit. It may ask you to save your work.` : `${rawTarget} is not running or could not be asked to quit.`} }
+      catch (error) { return {success: false, output: String(error)} }
+    }
     try {
       // Check known game process list first (e.g. LoL, Cyberpunk, Palworld, Roblox, Valorant)
       const gameProcesses = this.resolveGameProcesses(target)
@@ -1085,6 +1120,7 @@ export class ToolExecutor {
 
   /** Title of Spotify's main window ('' while it's still loading or closed) */
   private static spotifyWindowTitle(): Promise<string> {
+    if (isMac) return spotifyService.status().then(s => s.title)
     if (isLinux) return linuxSpotifyTitle()
     return new Promise((resolve) => {
       exec(
@@ -1114,6 +1150,7 @@ export class ToolExecutor {
   public static async mediaControl(
     action: 'next' | 'prev' | 'play' | 'pause' | 'play_pause' = 'next'
   ): Promise<{ success: boolean; output: string }> {
+    if (isMac) return spotifyService.control(action)
     if (isLinux) {
       return (await linuxMediaControl(action))
         ? { success: true, output: `Spotify: ${action} done.` }
@@ -1150,6 +1187,7 @@ export class ToolExecutor {
   }
 
   public static async getMediaStatus(): Promise<{ isPlaying: boolean; title: string }> {
+    if (isMac) return spotifyService.status()
     if (isLinux) return linuxMediaStatus()
     const mediaScript = scriptPath('media_controller.ps1')
 

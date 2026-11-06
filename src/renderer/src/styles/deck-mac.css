@@ -1,0 +1,148 @@
+/* Mac Dev Deck usability pass: keep the original artwork, layout and angular controls. */
+.cp-deck-mac .cp-deck-toolbar {
+  gap: 8px;
+}
+.cp-deck-mac .cp-deck-toolbar :is(button, select, input, a),
+.cp-deck-mac .cp-deck-composer {
+  -webkit-app-region: no-drag;
+}
+.cp-deck-mac .cp-deck-toolbar button {
+  min-height: 32px;
+  min-width: 32px;
+  line-height: 15px;
+}
+.cp-deck-mac .cp-deck-tabs {
+  flex-shrink: 0;
+}
+.cp-deck-mac .cp-deck-tabs button {
+  padding-inline: 9px;
+}
+.cp-deck-mac .cp-deck-workspace,
+.cp-deck-mac .cp-deck-project,
+.cp-deck-mac .cp-deck-tools,
+.cp-deck-mac .cp-deck-model {
+  min-width: 0;
+}
+.cp-deck-mac .cp-deck-project > span {
+  min-width: 36px;
+}
+.cp-deck-mac .cp-deck-project svg,
+.cp-deck-mac .cp-deck-tools > button {
+  flex-shrink: 0;
+}
+.cp-deck-mac .cp-deck-model {
+  min-height: 32px;
+}
+.cp-deck-mac .cp-deck-model select {
+  min-width: 65px;
+  width: 180px;
+  min-height: 28px;
+}
+.cp-deck-mac .cp-deck-settings {
+  width: 32px;
+}
+.cp-deck-mac :is(.cp-deck-toolbar, .cp-deck-chatbar) .text-stone-500,
+.cp-deck-mac .cp-deck-model > span {
+  color: #b8a39e;
+}
+.cp-deck-mac .cp-deck-toolbar .cp-label {
+  color: #b87670;
+}
+.cp-deck-mac .cp-deck-chatbar button {
+  min-height: 26px;
+  min-width: 44px;
+  line-height: 16px;
+}
+.cp-deck-mac .cp-deck-chatbar button > span {
+  font-size: 12px;
+}
+.cp-deck-mac .cp-deck-composer input {
+  min-width: 0;
+  min-height: 40px;
+}
+.cp-deck-mac .cp-deck-composer input::placeholder {
+  color: #b9aaa6;
+  opacity: 1;
+}
+.cp-deck-mac .cp-deck-composer button {
+  min-width: 36px;
+  min-height: 36px;
+  justify-content: center;
+}
+.cp-deck-mac .cp-deck-composer button svg {
+  width: 15px;
+  height: 15px;
+}
+.cp-deck-mac .cp-deck-messages .text-stone-600 {
+  color: #a28c85;
+}
+.cp-deck-mac .cp-deck-footer button {
+  align-self: stretch;
+  padding-inline: 10px;
+}
+.cp-deck-mac :is(button, select, input, textarea, a):focus-visible {
+  outline: 2px solid var(--cp-cyan);
+  outline-offset: -2px;
+}
+.cp-deck-mac :is(.cp-deck-toolbar, .cp-deck-chatbar, .cp-deck-composer, .cp-deck-footer) button:not(:disabled):hover {
+  background-color: #391b1c;
+  border-color: #b85651;
+  color: #fff0e8;
+}
+.cp-deck-mac :is(.cp-deck-toolbar, .cp-deck-chatbar, .cp-deck-footer) button:not(:disabled):active {
+  background-color: #4b2324;
+  box-shadow: inset 0 0 0 1px var(--cp-red);
+}
+.cp-deck-mac button:disabled {
+  cursor: not-allowed;
+}
+@media (max-width: 1100px) {
+  .cp-deck-mac .cp-deck-toolbar,
+  .cp-deck-mac .cp-deck-tools,
+  .cp-deck-mac .cp-deck-workspace {
+    gap: 4px;
+  }
+  .cp-deck-mac .cp-deck-project {
+    max-width: 125px;
+  }
+  .cp-deck-mac .cp-deck-model select {
+    width: 100px;
+  }
+  .cp-deck-mac .cp-deck-tabs button {
+    padding-inline: 6px;
+    font-size: 12px;
+  }
+}
+/* Reserve borders for both states so selecting a control does not shift its neighbours. */
+.cp-deck-mac .cp-deck-tabs button {
+  border-width: 1px;
+  border-style: solid;
+}
+.cp-deck-mac .cp-deck-tabs button[aria-pressed='false'] {
+  border-color: transparent;
+}
+.cp-deck-mac .cp-deck-chatbar button[aria-pressed] {
+  border: 1px solid transparent;
+}
+.cp-deck-mac .cp-deck-chatbar button[aria-pressed='true'] {
+  border-color: var(--cp-red-dim);
+}
+@media (max-width: 1000px) {
+  .cp-deck-mac .cp-deck-project {
+    max-width: 95px;
+  }
+  .cp-deck-mac .cp-deck-tools > button {
+    padding-inline: 6px;
+  }
+  .cp-deck-mac .cp-deck-tools > button span,
+  .cp-deck-mac .cp-deck-model > span {
+    font-size: 11px;
+  }
+}
+.cp-deck-mac .cp-deck-model select:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.cp-deck-mac .cp-deck-footer .cp-label {
+  color: #b87670;
+}

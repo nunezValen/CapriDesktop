@@ -1,3 +1,4 @@
+import { isMac } from '../services/platform'
 import { BrowserWindow, app } from 'electron'
 import { join } from 'path'
 import { assetPath } from '../services/app-paths'
@@ -12,7 +13,8 @@ export function createOnboardingWindow(): BrowserWindow {
     resizable: false,
     maximizable: false,
     show: false,
-    frame: false,
+    frame: isMac,
+    ...(isMac ? {titleBarStyle: 'hiddenInset' as const, trafficLightPosition:{x:14,y:13}} : {}),
     backgroundColor: '#0b0708',
     center: true,
     webPreferences: {

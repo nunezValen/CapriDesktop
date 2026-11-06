@@ -3,7 +3,8 @@ import { exec } from './hidden-process'
 import path from 'path'
 import fs from 'fs'
 import { consciousnessService } from './consciousness-service'
-import { isLinux, linuxForegroundWindow } from './platform'
+import { macForegroundWindow } from './mac-desktop'
+import { isMac, isLinux, linuxForegroundWindow } from './platform'
 
 export interface ActiveWindowInfo {
   title: string
@@ -28,6 +29,7 @@ export class ActiveWindowService {
    * Queries the currently active foreground or top visible user window.
    */
   public async getActiveOrTopWindow(): Promise<ActiveWindowInfo> {
+    if (isMac) return macForegroundWindow().catch(() => ({title: '', process: ''}))
     if (isLinux) {
       const win = await linuxForegroundWindow()
       return { title: win?.title || '', process: win?.process || '' }

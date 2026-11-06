@@ -3,11 +3,12 @@
  * (with 0.5 s of pre-roll) is encoded as 16 kHz mono WAV and passed to onUtterance.
  */
 
-import { openMicrophone } from './microphone'
+import { openMicrophone, openDefaultMicrophone } from './microphone'
 export interface AlwaysListenerOptions {
   onUtterance: (wav: ArrayBuffer) => void
   /** While true (Capri speaking, push-to-talk, agent busy) audio is ignored */
   isPaused: () => boolean
+  onError?: (error: Error) => void
   onLevel?: (level: number, speaking: boolean) => void
 }
 
@@ -40,15 +41,26 @@ export class AlwaysListener {
 
   public async start(): Promise<void> {
     if (this.stream) return
-    this.stream = await openMicrophone({ echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 })
+    this.stream = /Mac/i.test(navigator.platform)
+      ? await openDefaultMicrophone({echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1})
+      : await openMicrophone({echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1})
+    try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
     this.ctx = new AudioCtx()
+    await this.ctx.resume()
+    this.stream.getAudioTracks().forEach(track => {
+      track.onended = () => { this.stop(); this.opts.onError?.(new Error("Microphone disconnected. Turn listening on again after reconnecting it.")) }
+    })
     this.source = this.ctx.createMediaStreamSource(this.stream)
     // ScriptProcessor is deprecated but universally available in Electron and plenty for VAD
     this.processor = this.ctx.createScriptProcessor(FRAME, 1, 1)
     this.processor.onaudioprocess = (e) => this.onFrame(e.inputBuffer.getChannelData(0))
     this.source.connect(this.processor)
     this.processor.connect(this.ctx.destination)
+    } catch (error) {
+      this.stop()
+      throw error
+    }
   }
 
   public stop(): void {
@@ -56,13 +68,14 @@ export class AlwaysListener {
       this.processor?.disconnect()
       this.source?.disconnect()
     } catch {}
-    this.stream?.getTracks().forEach((t) => t.stop())
+    this.stream?.getTracks().forEach((t) => { t.onended = null; t.stop() })
     this.ctx?.close().catch(() => {})
     this.stream = null
     this.ctx = null
     this.processor = null
     this.source = null
     this.reset()
+    this.preRoll = []
   }
 
   private reset(): void {

@@ -7,11 +7,15 @@ export type HotkeyAction = 'talk' | 'listen' | 'chat'
 export type Hotkeys = Record<HotkeyAction, string>
 export type HotkeyProblem = 'needsModifier' | 'reserved' | 'inUse' | 'taken'
 
-export const DEFAULT_HOTKEYS: Hotkeys = { talk: 'Down', listen: 'Right', chat: 'Left' }
+export function defaultHotkeys(platform:string): Hotkeys {
+  return platform==='darwin' ? {talk:'Alt+Super+V',listen:'Alt+Super+L',chat:'Alt+Super+C'} : {talk:'Down',listen:'Right',chat:'Left'}
+}
+const macPlatform=(typeof process!=='undefined' && process.platform==='darwin') || (typeof navigator!=='undefined' && /Mac/i.test(navigator.platform))
+export const DEFAULT_HOTKEYS: Hotkeys = defaultHotkeys(macPlatform ? 'darwin' : 'other')
 export const HOTKEY_ACTIONS: HotkeyAction[] = ['talk', 'listen', 'chat']
 
 /** Her fixed shortcuts, and Escape, which cancels a recording and a key being chosen */
-const RESERVED = new Set(['Control+Alt+V', 'Control+Alt+S', 'Control+Alt+G', 'Escape'])
+const RESERVED = new Set(['Control+Alt+V', 'Control+Alt+S', 'Control+Alt+G', 'Alt+Super+V', 'Alt+Super+S', 'Alt+Super+G', 'Escape'])
 
 const NAMED_KEYS: Record<string, string> = {
   ArrowUp: 'Up',
@@ -82,7 +86,7 @@ export function normalizeHotkeys(saved: unknown): Hotkeys {
   return { talk: pick('talk'), listen: pick('listen'), chat: pick('chat') }
 }
 
-const SYMBOLS: Record<string, string> = { Up: '↑', Down: '↓', Left: '←', Right: '→', Control: 'Ctrl', Super: 'Win', Return: 'Enter' }
+const SYMBOLS: Record<string, string> = { Up: '↑', Down: '↓', Left: '←', Right: '→', Control: 'Ctrl', Super: macPlatform ? '⌘' : 'Win', Return: 'Enter' }
 
 /** How a key is shown to the user */
 export function formatHotkey(accelerator: string): string {
