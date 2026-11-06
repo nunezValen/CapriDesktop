@@ -54,16 +54,22 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
 
   const handleSave = async () => {
     if (!(await formRef.current?.save())) return
+ try {
     // Save the system prompt only if it was loaded and changed (applies from the next message)
     if (promptLoaded && promptText !== savedPrompt) await window.api.agent.setSystemPrompt(promptText)
+       }
     if (provider === 'local' && modelInput) {
       setLlmConfig({ model: modelInput })
       await window.api.agent.setConfig({ model: modelInput })
     }
     onClose()
+  } catch (error) {
+    console.error("Failed to save configuration:", error)
+    
+    // Keeps the modal open and gives the user explicit feedback
+    alert("Failed to save changes. Please check file permissions and try again.")
   }
-
-  if (!isOpen) return null
+}
 
   // True when the text in the box is not the built-in prompt
   const promptIsCustom = promptLoaded && promptText.trim() !== defaultPrompt.trim()
@@ -132,6 +138,7 @@ export const AgentSettingsModal: React.FC<AgentSettingsModalProps> = ({ isOpen, 
             </div>
             <div className="cp-frame">
               <textarea
+		maxLength={20000}
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
                 disabled={!promptLoaded}

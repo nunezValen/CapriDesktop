@@ -342,8 +342,5 @@ export const en = {
   sp_chars: '{n} characters'
 }
 
-// The system prompt editor texts only exist in English for now. The other languages may leave
-// them out and translator() falls back to English, so no other language file had to change.
-type SystemPromptKeys = 'sp_title' | 'sp_hint' | 'sp_custom' | 'sp_default' | 'sp_reset' | 'sp_chars'
-export type Messages = Omit<typeof en, SystemPromptKeys> & Partial<Pick<typeof en, SystemPromptKeys>>
-export type MessageKey = keyof typeof en
+export type Messages = typeof en
+export type MessageKey = keyof Messages

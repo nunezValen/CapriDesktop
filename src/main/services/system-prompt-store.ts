@@ -112,6 +112,7 @@ export function setSystemPrompt(text: string): SystemPromptInfo {
     cached = clean
   } catch (e) {
     console.warn('[Capri] Could not save the custom system prompt:', e)
+    throw e
   }
   return getSystemPromptInfo()
 }
@@ -120,9 +121,10 @@ export function setSystemPrompt(text: string): SystemPromptInfo {
 export function resetSystemPrompt(): SystemPromptInfo {
   try {
     if (fs.existsSync(promptFile())) fs.unlinkSync(promptFile())
+    cached = null
   } catch (e) {
     console.warn('[Capri] Could not delete the custom system prompt file:', e)
+    throw e
   }
-  cached = null
   return getSystemPromptInfo()
 }
