@@ -5,7 +5,10 @@ import { app } from 'electron'
 import { IPC_CHANNELS, ScannerBounds } from '../ipc/channels'
 import { clampGamingOpacity, normalizeHotkeys, type Hotkeys } from '../../shared/hotkeys'
 
+export type MusicPlatform = 'youtube_music' | 'spotify'
+
 export interface ConsciousnessData {
+  musicPlatform?: MusicPlatform
   shutdownCount: number
   bootCount: number
   lastShutdownTimestamp: number
@@ -88,6 +91,7 @@ class ConsciousnessService {
   private pendingScanLearning: { description: string; tags: string[]; timestamp: number } | null = null
   private languageListeners: Array<(lang: string) => void> = []
   private data: ConsciousnessData = {
+    musicPlatform: 'spotify',
     shutdownCount: 0,
     bootCount: 0,
     lastShutdownTimestamp: 0,
@@ -379,6 +383,17 @@ class ConsciousnessService {
     if (this.data.lastRunVersion === version) return
     this.data.lastRunVersion = version
     this.save()
+  }
+
+  public getMusicPlatform(): MusicPlatform {
+    return this.data.musicPlatform === 'youtube_music' ? 'youtube_music' : 'spotify'
+  }
+
+  public setMusicPlatform(platform: MusicPlatform): MusicPlatform {
+    if (platform !== 'youtube_music' && platform !== 'spotify') throw new Error('Invalid music platform')
+    this.data.musicPlatform = platform
+    this.save()
+    return platform
   }
 
   public getLanguageSettings(): LanguageSettings {

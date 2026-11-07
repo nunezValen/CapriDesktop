@@ -2,6 +2,7 @@ import { shell } from 'electron'
 import { localizeLine } from '../../shared/lines'
 import { agentManager } from '../agents/agent-manager'
 import { scannerService } from './scanner-service'
+import { musicPlatformName } from './music-platform'
 import { consciousnessService } from './consciousness-service'
 import { ToolExecutor } from '../agents/tools/tool-executor'
 import { windowManager } from '../windows/window-manager'
@@ -205,26 +206,28 @@ export class BoredomService {
     this.lastTriggeredTime = Date.now()
 
     if (category === 'spotify') {
+      const platform = consciousnessService.getMusicPlatform()
+      const platformName = musicPlatformName(platform)
       const song = SPOTIFY_SONGS[Math.floor(Math.random() * SPOTIFY_SONGS.length)]
       const phrasesEs = [
-        `¡Uff, qué embole, {name}! Estoy re aburrida de estar acá quieta... Pará que pongo "${song}" en Spotify para levantar la onda.`,
-        `Me aburrí de este silencio mortal, choomba... Hackeando Spotify ya mismo, te pongo "${song}" bien arriba.`,
-        `¡Qué embole mal! No me aguanto las ganas de escuchar música, mandando "${song}" a Spotify ahora mismo.`
+        `¡Uff, qué embole, {name}! Estoy re aburrida de estar acá quieta... Pará que pongo "${song}" en ${platformName} para levantar la onda.`,
+        `Me aburrí de este silencio mortal, choomba... Hackeando ${platformName} ya mismo, te pongo "${song}" bien arriba.`,
+        `¡Qué embole mal! No me aguanto las ganas de escuchar música, mandando "${song}" a ${platformName} ahora mismo.`
       ]
       const phrasesEn = [
-        `Uff, so bored, {name}! I'm completely bored just standing around... Hold up, throwing "${song}" on Spotify to hype up the vibe!`,
-        `Silence is killing me, choomba... Jacking into Spotify right now, putting on "${song}"!`
+        `Uff, so bored, {name}! I'm completely bored just standing around... Hold up, throwing "${song}" on ${platformName} to hype up the vibe!`,
+        `Silence is killing me, choomba... Jacking into ${platformName} right now, putting on "${song}"!`
       ]
       const speech = isEs ? phrasesEs[Math.floor(Math.random() * phrasesEs.length)] : phrasesEn[Math.floor(Math.random() * phrasesEn.length)]
 
       agentManager.setCompanionState('talking')
-      agentManager.setCompanionSpeech(speech, 5000, true, `{name} was quiet and you got bored, so you put "${song}" on Spotify. Nobody asked: you picked it yourself because you like it`)
+      agentManager.setCompanionSpeech(speech, 5000, true, `{name} was quiet and you got bored, so you put "${song}" on ${platformName}. Nobody asked: you picked it yourself because you like it`)
 
       setTimeout(async () => {
         try {
           await ToolExecutor.execute(
             'open_application',
-            { appOrUrl: 'spotify', query: song, isChange: true },
+            { appOrUrl: platform, query: song, isChange: true },
             ''
           )
         } catch (e) {

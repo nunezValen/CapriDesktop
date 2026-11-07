@@ -17,12 +17,15 @@ import {
   matchDesktopEntry,
   startCommand
 } from '../../services/platform'
+import { searchYoutubeMusic, startYoutubeMusic } from '../../services/youtube-music'
 import { scriptPath } from '../../services/app-paths'
 import * as os from 'os'
 import * as fs from 'fs'
 import * as path from 'path'
 import { exec } from '../../services/hidden-process'
 import { app, shell } from 'electron'
+import { consciousnessService } from '../../services/consciousness-service'
+import { resolveMusicPlatform, musicPlatformName, type PlaybackPlatform } from '../../services/music-platform'
 import { clipService } from '../../services/clip-service'
 import { askWhereAppIs, openInstalledApp, protocolIsRegistered } from '../../services/app-launcher'
 import { cleanAppRequest } from '../../services/app-finder'
@@ -143,7 +146,7 @@ export const CAPRI_TOOLS: ToolDefinition[] = [
       properties: {
         appOrUrl: {
           type: 'string',
-          description: 'Name of the app or game (e.g. "lol", "cyberpunk", "palworld", "spotify", "youtube", "obs", "chrome", "steam", "discord", "notepad", "calc") or website URL.'
+          description: 'Name of the app or game (e.g. "lol", "cyberpunk", "palworld", "spotify", "youtube", "obs", "chrome", "steam", "discord", "notepad", "calc") or website URL. Use "music" for music on the preferred platform unless the user explicitly requests Spotify, YouTube Music, or YouTube.'
         },
         query: {
           type: 'string',
@@ -187,10 +190,14 @@ export const CAPRI_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'media_control',
-    description: 'Control music playback without changing to a specific title (e.g. skip to next song, previous song, play, pause). If the user asks for a specific song name (e.g. "change song to X", "play X"), use open_application with appOrUrl: "spotify" and query: "<song>" instead.',
+    description: 'Control music playback without changing to a specific title (e.g. skip to next song, previous song, play, pause). If the user asks for a specific song name (e.g. "change song to X", "play X"), use open_application with appOrUrl: "music" (the preferred platform), or an explicitly requested "spotify", "youtube music", or "youtube", and query: "<song>" instead.',
     parameters: {
       type: 'object',
       properties: {
+        appOrUrl: {
+          type: 'string',
+          description: 'Optional explicitly requested platform: spotify, youtube music, or youtube. Omit to use the preferred music platform.'
+        },
         action: {
           type: 'string',
           enum: ['next', 'prev', 'play', 'pause', 'play_pause'],
@@ -272,7 +279,7 @@ export class ToolExecutor {
       switch (name) {
         case 'media_control': {
           const action = String(args.action || 'next') as 'next' | 'prev' | 'play' | 'pause' | 'play_pause'
-          return await ToolExecutor.mediaControl(action)
+          return await ToolExecutor.mediaControl(action, resolveMusicPlatform(String(args.appOrUrl || '')))
         }
         case 'trigger_clip': {
           const res = await clipService.triggerClip()
@@ -610,27 +617,31 @@ export class ToolExecutor {
       return { success: false, output: 'Error: No application, URL, or song query provided to open.' }
     }
 
-    let target = (rawTarget || (rawQuery ? 'spotify' : '')).toLowerCase().trim()
+    let target = (rawTarget || (rawQuery ? 'music' : '')).toLowerCase().trim()
 
     // Conversational Context Repair: Fix inputs like "play on spotify <song>" where target became "on" or "on spotify"
     if (/^(?:on|in|en)\s+spotify$/i.test(target) || (target === 'on' && (/spotify/i.test(rawQuery) || /spotify/i.test(rawTarget)))) {
       target = 'spotify'
     } else if (target === 'on' || target === 'en' || target === 'in') {
       if (rawQuery.toLowerCase().includes('spotify') || /musica|music|song|cancion/i.test(rawQuery)) {
-        target = 'spotify'
+        target = resolveMusicPlatform(rawQuery)
         rawQuery = rawQuery.replace(/^(?:on\s+spotify|en\s+spotify|spotify)\s*/i, '').trim()
       } else {
-        target = 'spotify'
+        target = resolveMusicPlatform(rawQuery)
       }
     } else if (target.startsWith('on ') || target.startsWith('en ') || target.startsWith('in ')) {
       const stripped = target.replace(/^(?:on|en|in)\s+/i, '').trim()
       if (stripped.includes('spotify')) {
         target = 'spotify'
       } else if (stripped.includes('youtube')) {
-        target = 'youtube'
+        target = resolveMusicPlatform(stripped)
       } else {
         target = stripped
       }
+    }
+
+    if (/^(?:music|musica|música|cancion|canción|song)(?:\s|$)/i.test(target)) {
+      target = resolveMusicPlatform(`${rawTarget} ${rawQuery}`)
     }
 
     try {
@@ -646,43 +657,46 @@ export class ToolExecutor {
 
       // An installed app by its name comes before the shortcuts below, which go by a word inside the
       // name: without this "google earth" opens the browser. These names are what those shortcuts are for
-      const handledBelow = /^(?:youtube|spotify|musica|música|music|cancion|canción|navegador|browser|browser_search|internet|google|notas|bloc de notas)$/i
+      const handledBelow = /^(?:youtube|youtube[ _]music|spotify|musica|música|music|cancion|canción|navegador|browser|browser_search|internet|google|notas|bloc de notas)$/i
       if (!rawUrl && !rawQuery && !handledBelow.test(cleanAppRequest(target))) {
         const opened = await openInstalledApp(rawTarget)
         if (opened) return { success: true, output: `Launched ${opened} successfully!` }
       }
 
-      // YouTube (with direct song / video search and playback)
-      if (target.includes('youtube') || rawUrl.includes('youtube')) {
-        const query = rawQuery || (target.includes('youtube') ? target.replace(/^(?:youtube|abre\s+youtube|open\s+youtube)\s*/i, '').trim() : '')
-        let finalUrl = rawUrl || 'https://www.youtube.com'
-
-        if (query) {
-          try {
-            const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-            })
-            const html = await res.text()
-            const m = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/)
-            if (m && m[1]) {
-              finalUrl = `https://www.youtube.com/watch?v=${m[1]}&autoplay=1`
-            } else {
-              finalUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
-            }
-          } catch {
-            finalUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+      // YouTube and YouTube Music (with direct song / video search)
+      if (target.includes('youtube')) {
+        const platform = resolveMusicPlatform(target)
+        const isMusic = platform === 'youtube_music'
+        const name = musicPlatformName(platform)
+        const query = (rawQuery || target.replace(/^(?:(?:abre|open)\s+)?youtube(?:[ _]+music)?\s*/i, '')).trim()
+        const homeUrl = isMusic ? 'https://music.youtube.com' : 'https://www.youtube.com'
+        let finalUrl = query
+          ? (isMusic ? `${homeUrl}/search?q=${encodeURIComponent(query)}` : `${homeUrl}/results?search_query=${encodeURIComponent(query)}`)
+          : homeUrl
+        let songTitle: string | undefined
+        if (query && isMusic) {
+          const song = await searchYoutubeMusic(query)
+          if (song) {
+            songTitle = song.title
+            finalUrl = `${homeUrl}/watch?v=${song.videoId}&autoplay=1`
           }
         }
-
-        shell.openExternal(finalUrl).catch(() => {
-          exec(startCommand(finalUrl))
-        })
-        return {
-          success: true,
-          output: query
-            ? `Playing "${query}" on YouTube: ${finalUrl}`
-            : 'Launched YouTube in your browser.'
+        if (query && !isMusic) {
+          try {
+            const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              signal: AbortSignal.timeout(8000)
+            })
+            if (res.ok) {
+              const html = await res.text()
+              const match = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/) || html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/)
+              if (match) finalUrl = `${homeUrl}/watch?v=${match[1]}${isMusic ? '' : '&autoplay=1'}`
+            }
+          } catch {}
         }
+        await shell.openExternal(finalUrl).catch(() => { exec(startCommand(finalUrl)) })
+        if (songTitle) await startYoutubeMusic(songTitle)
+        return { success: true, output: query ? `Playing "${query}" on ${name}: ${finalUrl}` : `Launched ${name} in your browser.` }
       }
 
       // OBS Studio
@@ -752,7 +766,7 @@ export class ToolExecutor {
       }
 
       // Spotify (with song search, playback, and skip/change controls)
-      if (target.includes('spotify') || /\b(?:musica|music|cancion)\b/.test(target)) {
+      if (target.includes('spotify')) {
         let query = rawQuery || (target.includes('spotify') ? target.replace(/^(?:spotify|abre\s+spotify|open\s+spotify)\s*/i, '').trim() : '')
         // Clean out filler phrases (e.g. "and start playing", "play", "pon", "listen to", "on spotify")
         query = query
@@ -768,7 +782,7 @@ export class ToolExecutor {
 
         // If user intent was purely to change song / next track without a target song:
         if (query === '__NEXT_TRACK__' || /^(?:cambia\s+(?:de\s+|la\s+)?cancion|skip\s+(?:song|track)|next\s+(?:song|track)|skip|next|otra\s+cancion|siguiente\s+cancion|siguiente|otra)$/i.test(query)) {
-          return await ToolExecutor.mediaControl('next')
+          return await ToolExecutor.mediaControl('next', 'spotify')
         }
 
         if (isLinux) return await ToolExecutor.linuxSpotify(query)
@@ -1112,37 +1126,39 @@ export class ToolExecutor {
   }
 
   public static async mediaControl(
-    action: 'next' | 'prev' | 'play' | 'pause' | 'play_pause' = 'next'
+    action: 'next' | 'prev' | 'play' | 'pause' | 'play_pause' = 'next',
+    platform: PlaybackPlatform = consciousnessService.getMusicPlatform()
   ): Promise<{ success: boolean; output: string }> {
+    const name = musicPlatformName(platform)
     if (isLinux) {
-      return (await linuxMediaControl(action))
-        ? { success: true, output: `Spotify: ${action} done.` }
-        : { success: false, output: 'Spotify is not open, so there is nothing to control.' }
+      return (await linuxMediaControl(action, platform !== 'spotify'))
+        ? { success: true, output: `${name}: ${action} done.` }
+        : { success: false, output: `No active ${name} media player is available.` }
     }
     const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
     const spotifyExe = path.join(appData, 'Spotify', 'Spotify.exe')
     const spotifyDir = path.dirname(spotifyExe)
     const mediaScript = scriptPath('media_controller.ps1')
 
-    if (fs.existsSync(spotifyExe)) {
+    if (platform === 'spotify' && fs.existsSync(spotifyExe)) {
       exec(`powershell -Command "if (-not (Get-Process Spotify -ErrorAction SilentlyContinue)) { Start-Process -FilePath '${spotifyExe}' -WorkingDirectory '${spotifyDir}' }"`)
     }
 
     return new Promise((resolve) => {
-      exec(`powershell -ExecutionPolicy Bypass -File "${mediaScript}" -Action "${action}"`, (err) => {
+      exec(`powershell -ExecutionPolicy Bypass -File "${mediaScript}" -Action "${action}"${platform !== 'spotify' ? ' -SystemMedia' : ''}`, (err) => {
         if (err) {
           resolve({ success: false, output: `Media control error: ${err.message}` })
         } else {
           const desc =
             action === 'next'
-              ? 'Skipped to the next song on Spotify'
+              ? `Skipped to the next song on ${name}`
               : action === 'prev'
-              ? 'Returned to the previous song on Spotify'
+              ? `Returned to the previous song on ${name}`
               : action === 'pause'
-              ? 'Paused Spotify playback'
+              ? `Paused ${name} playback`
               : action === 'play'
-              ? 'Resumed Spotify playback'
-              : 'Toggled playback on Spotify'
+              ? `Resumed ${name} playback`
+              : `Toggled playback on ${name}`
           resolve({ success: true, output: `${desc} successfully!` })
         }
       })

@@ -69,6 +69,8 @@ export interface IElectronAPI {
     cancelScript: () => void
     onToggleChat: (callback: () => void) => () => void
     getUserProfile: () => Promise<{ name: string; hasName: boolean; onboardingDone: boolean }>
+    getMusicPlatform: () => Promise<'youtube_music' | 'spotify'>
+    setMusicPlatform: (platform: 'youtube_music' | 'spotify') => Promise<'youtube_music' | 'spotify'>
     setUserName: (name: string) => Promise<string>
     onUserNameChanged: (callback: (name: string) => void) => () => void
     getLanguageSettings: () => Promise<{ textLang: string; speechLang: string; micLang: string }>

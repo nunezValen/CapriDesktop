@@ -40,6 +40,8 @@ export const IPC_CHANNELS = {
   COMPANION_LINE_LANGUAGE: 'companion:lineLanguage',
   COMPANION_SET_LANGUAGE: 'companion:setLanguage',
   COMPANION_LANGUAGE_CHANGED: 'companion:languageChanged',
+  COMPANION_GET_MUSIC_PLATFORM: 'companion:getMusicPlatform',
+  COMPANION_SET_MUSIC_PLATFORM: 'companion:setMusicPlatform',
   COMPANION_GET_LANGUAGE_SETTINGS: 'companion:getLanguageSettings',
   COMPANION_GET_USER_PROFILE: 'companion:getUserProfile',
   COMPANION_SET_USER_NAME: 'companion:setUserName',

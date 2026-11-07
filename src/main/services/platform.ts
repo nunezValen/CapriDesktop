@@ -475,7 +475,8 @@ function mprisCall(method: string, ...args: string[]): Promise<boolean> {
 }
 
 /** Sends a play/pause/next command to Spotify. dbus-send is there even without playerctl */
-export async function linuxMediaControl(action: MediaAction): Promise<boolean> {
+export async function linuxMediaControl(action: MediaAction, systemMedia = false): Promise<boolean> {
+  if (systemMedia) return (await run('playerctl', ['--ignore-player=spotify', PLAYERCTL_ACTION[action]])) !== null
   if ((await run('playerctl', ['-p', 'spotify', PLAYERCTL_ACTION[action]])) !== null) return true
   return mprisCall(MPRIS_METHOD[action])
 }

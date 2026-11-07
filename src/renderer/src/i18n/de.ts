@@ -1,6 +1,8 @@
 import type { Messages } from './en'
 
 export const de: Messages = {
+  music_platformTitle: 'Musikplattform',
+  music_platformHelp: 'Wird verwendet, wenn Capri Musik abspielen soll. Du kannst auch eine Plattform beim Namen nennen.',
   close: 'Schließen',
   done: 'Fertig',
   saved: 'Gespeichert',

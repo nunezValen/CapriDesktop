@@ -1,4 +1,5 @@
-import { listProcessNames, mediaWindowTitles } from './platform'
+import { youtubeMusicTitle, windowsYoutubeMusic } from './youtube-music'
+import { isWindows, listProcessNames, mediaWindowTitles } from './platform'
 import os from 'os'
 import { agentManager } from '../agents/agent-manager'
 import { consciousnessService } from './consciousness-service'
@@ -11,7 +12,7 @@ interface TriggerConfig {
 }
 
 export interface ActiveMediaInfo {
-  type: 'youtube' | 'tiktok' | 'reels' | 'twitch' | 'netflix' | 'spotify' | 'google' | 'browser' | 'game' | 'code' | 'other'
+  type: 'youtube_music' | 'youtube' | 'tiktok' | 'reels' | 'twitch' | 'netflix' | 'spotify' | 'google' | 'browser' | 'game' | 'code' | 'other'
   title: string
   creator?: string
   artist?: string
@@ -23,6 +24,7 @@ export interface ActiveMediaInfo {
 }
 
 export interface ActiveMediaRegistry {
+  youtube_music?: ActiveMediaInfo
   spotify?: ActiveMediaInfo
   youtube?: ActiveMediaInfo
   tiktok?: ActiveMediaInfo
@@ -256,6 +258,14 @@ export class SystemObserver {
                   `Streaming "${detectedMedia.title}"? Looks like movie night in Night City, choomba!`
                 ]
             this.triggerCapriReaction(lines[Math.floor(Math.random() * lines.length)], 'talking')
+          } else if (detectedMedia.type === 'youtube_music') {
+            const artist = detectedMedia.artist ? ` (${detectedMedia.artist})` : ''
+            this.triggerCapriReaction(
+              isEs
+                ? `¿Escuchando "${detectedMedia.title}"${artist} en YouTube Music? ¡Temazo, choomba! Que siga sonando.`
+                : `Spinning "${detectedMedia.title}"${artist} on YouTube Music, choomba! Keep the music pumping.`,
+              'talking'
+            )
           } else if (detectedMedia.type === 'spotify') {
             const lines = isEs
               ? [
@@ -506,8 +516,13 @@ export class SystemObserver {
   }
 
   public getActiveMedia(
-    filter?: 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
+    filter?: 'youtube_music' | 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
   ): ActiveMediaInfo | null {
+    if (filter === 'audio' || filter === 'youtube_music') {
+      const music = this.mediaRegistry.youtube_music
+      if (music && Date.now() - music.lastSeen < 3 * 60 * 1000) return music
+      if (filter === 'youtube_music') return null
+    }
     if (filter === 'spotify' || filter === 'audio') {
       return this.mediaRegistry.spotify && Date.now() - this.mediaRegistry.spotify.lastSeen < 3 * 60 * 1000
         ? this.mediaRegistry.spotify
@@ -549,15 +564,17 @@ export class SystemObserver {
   }
 
   public async detectActiveMedia(
-    filter?: 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
+    filter?: 'youtube_music' | 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
   ): Promise<ActiveMediaInfo | null> {
     return new Promise((resolve) => {
-      void mediaWindowTitles().then((rows) => {
-        if (!rows) return resolve(this.getActiveMedia(filter))
+      void mediaWindowTitles().then(async (rows) => {
+        const hasYoutubeMusic = rows?.some((row) => /youtube music/i.test(row.title))
+        const sessions = isWindows && hasYoutubeMusic ? await windowsYoutubeMusic('status') : null
+        if (!rows && !Array.isArray(sessions)) return resolve(this.getActiveMedia(filter))
 
         const freshRegistry: ActiveMediaRegistry = {}
 
-        for (const row of rows) {
+        for (const row of rows || []) {
           {
             const proc = row.proc
             const rawTitle = row.title
@@ -568,8 +585,22 @@ export class SystemObserver {
 
             const lowerTitle = rawTitle.toLowerCase()
 
+            const musicTitle = youtubeMusicTitle(rawTitle)
+            if (musicTitle && /chrome|msedge|brave|firefox|opera|youtube/i.test(proc)) {
+              freshRegistry.youtube_music = {
+                type: 'youtube_music',
+                title: musicTitle,
+                track: musicTitle,
+                rawTitle,
+                appName: 'YouTube Music',
+                lastSeen: Date.now()
+              }
+              continue
+            }
+            if (lowerTitle.includes('youtube music')) continue
+
             // YouTube Video
-            if (lowerTitle.includes('youtube') && !freshRegistry.youtube) {
+            if (lowerTitle.includes('youtube') && !lowerTitle.includes('youtube music') && !freshRegistry.youtube) {
               let cleanTitle = rawTitle
                 .replace(/\s*-\s*YouTube.*$/i, '')
                 .replace(/\s*-\s*(?:Google Chrome|Microsoft Edge|Brave|Mozilla Firefox|Opera(?:\s+GX)?).*$/i, '')
@@ -771,8 +802,27 @@ export class SystemObserver {
           }
         }
 
+        if (Array.isArray(sessions)) {
+          const session = sessions.find((item) => item.status === 'Playing' && item.title)
+          if (session) {
+            freshRegistry.youtube_music = {
+              type: 'youtube_music',
+              title: session.title,
+              track: session.title,
+              artist: session.artist || undefined,
+              creator: session.artist || undefined,
+              rawTitle: session.title,
+              appName: 'YouTube Music',
+              lastSeen: Date.now()
+            }
+          } else if (sessions.length) {
+            delete freshRegistry.youtube_music
+          }
+        }
         this.mediaRegistry = freshRegistry
 
+        if (filter === 'youtube_music') return resolve(this.mediaRegistry.youtube_music || null)
+        if (filter === 'audio' && this.mediaRegistry.youtube_music) return resolve(this.mediaRegistry.youtube_music)
         if (filter === 'spotify' || filter === 'audio') {
           return resolve(this.mediaRegistry.spotify || null)
         }
@@ -800,6 +850,7 @@ export class SystemObserver {
         }
 
         this.latestActiveMedia =
+          this.mediaRegistry.youtube_music ||
           this.mediaRegistry.youtube ||
           this.mediaRegistry.tiktok ||
           this.mediaRegistry.reels ||
@@ -815,7 +866,7 @@ export class SystemObserver {
   }
 
   public async getActiveMediaAsync(
-    filter?: 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
+    filter?: 'youtube_music' | 'spotify' | 'youtube' | 'tiktok' | 'reels' | 'video' | 'audio' | 'browser'
   ): Promise<ActiveMediaInfo | null> {
     const fresh = await this.detectActiveMedia(filter)
     return fresh || this.getActiveMedia(filter)

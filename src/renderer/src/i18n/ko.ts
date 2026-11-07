@@ -1,6 +1,8 @@
 import type { Messages } from './en'
 
 export const ko: Messages = {
+  music_platformTitle: '음악 플랫폼',
+  music_platformHelp: 'Capri에게 음악 재생을 요청할 때 사용합니다. 플랫폼 이름을 직접 지정할 수도 있습니다.',
   close: '닫기',
   done: '완료',
   saved: '저장됨',

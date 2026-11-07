@@ -122,6 +122,10 @@ const api = {
     getUserProfile: (): Promise<{ name: string; hasName: boolean; onboardingDone: boolean }> =>
       ipcRenderer.invoke(IPC_CHANNELS.COMPANION_GET_USER_PROFILE),
 
+    getMusicPlatform: (): Promise<'youtube_music' | 'spotify'> => ipcRenderer.invoke(IPC_CHANNELS.COMPANION_GET_MUSIC_PLATFORM),
+    setMusicPlatform: (platform: 'youtube_music' | 'spotify'): Promise<'youtube_music' | 'spotify'> =>
+      ipcRenderer.invoke(IPC_CHANNELS.COMPANION_SET_MUSIC_PLATFORM, platform),
+
     setUserName: (name: string): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.COMPANION_SET_USER_NAME, name),
 
     onUserNameChanged: (callback: (name: string) => void): (() => void) => {

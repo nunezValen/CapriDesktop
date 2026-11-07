@@ -1,6 +1,8 @@
 import type { Messages } from './en'
 
 export const zh: Messages = {
+  music_platformTitle: '音乐平台',
+  music_platformHelp: '请 Capri 播放音乐时使用。也可以直接指定平台名称。',
   close: '关闭',
   done: '完成',
   saved: '已保存',

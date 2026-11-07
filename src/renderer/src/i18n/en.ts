@@ -1,4 +1,6 @@
 export const en = {
+  music_platformTitle: 'Music platform',
+  music_platformHelp: 'Used when you ask Capri to play music. You can also request a platform by name.',
   close: 'Close',
   done: 'Done',
   saved: 'Saved',

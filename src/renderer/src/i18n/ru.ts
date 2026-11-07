@@ -1,6 +1,8 @@
 import type { Messages } from './en'
 
 export const ru: Messages = {
+  music_platformTitle: 'Музыкальная платформа',
+  music_platformHelp: 'Используется, когда вы просите Capri включить музыку. Также можно указать платформу по имени.',
   close: 'Закрыть',
   done: 'Готово',
   saved: 'Сохранено',

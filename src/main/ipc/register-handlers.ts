@@ -213,6 +213,9 @@ export function registerIpcHandlers(): void {
     setTimeout(() => voiceService.warmTranslator(), 5000)
   }
 
+  ipcMain.handle(IPC_CHANNELS.COMPANION_GET_MUSIC_PLATFORM, () => consciousnessService.getMusicPlatform())
+  ipcMain.handle(IPC_CHANNELS.COMPANION_SET_MUSIC_PLATFORM, (_event, platform) => consciousnessService.setMusicPlatform(platform))
+
   ipcMain.handle(IPC_CHANNELS.COMPANION_GET_LANGUAGE_SETTINGS, () => consciousnessService.getLanguageSettings())
 
   // First-run setup (onboarding window)

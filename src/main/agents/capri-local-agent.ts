@@ -16,7 +16,8 @@ import { CAPRI_TOOLS, ToolExecutor } from './tools/tool-executor'
 import { ollamaService } from '../services/ollama-service'
 import { windowManager } from '../windows/window-manager'
 import { roamingManager } from '../roaming/roaming-manager'
-import { systemObserver } from '../services/system-observer'
+import { systemObserver, type ActiveMediaInfo } from '../services/system-observer'
+import { resolveMusicPlatform, musicPlatformName, type PlaybackPlatform } from '../services/music-platform'
 import { consciousnessService } from '../services/consciousness-service'
 import { scannerService } from '../services/scanner-service'
 import { boredomService } from '../services/boredom-service'
@@ -1124,14 +1125,16 @@ export class CapriLocalAgent extends EventEmitter {
     }
 
 // Direct Song & Video Queue Interceptor (YouTube & Spotify)
+    const playbackPlatform = resolveMusicPlatform(trimmed)
+    const playbackName = musicPlatformName(playbackPlatform)
     const directMusic = this.parseMusicRequest(trimmed)
     if (directMusic && directMusic.songQuery) {
       if (directMusic.songQuery === '__NEXT_TRACK__' || /^(?:cambia|skip|next|otra|siguiente)/i.test(directMusic.songQuery)) {
-        await this.runSingleTool('media_control', { action: 'next' }, projectPath, 'Skipping track on Spotify audio net...')
+        await this.runSingleTool('media_control', { action: 'next', appOrUrl: playbackPlatform }, projectPath, `Skipping track on ${playbackName} audio net...`)
         this.emitAssistant(
           isSpanish
-            ? "¡Pista saltada! Ya está sonando el siguiente tema en Spotify, choomba. ¡Que siga el ritmo!"
-            : "Track skipped! Next tune spinning on Spotify, choomba. Let's keep the vibe going!"
+            ? `¡Pista saltada! Ya está sonando el siguiente tema en ${playbackName}, choomba. ¡Que siga el ritmo!`
+            : `Track skipped! Next tune spinning on ${playbackName}, choomba. Let's keep the vibe going!`
         )
         this.finishSession()
         return
@@ -1142,17 +1145,17 @@ export class CapriLocalAgent extends EventEmitter {
         { appOrUrl: directMusic.platform, query: directMusic.songQuery, isChange: !!directMusic.isChange },
         projectPath,
         directMusic.isChange
-          ? `Jacking into ${directMusic.platform.toUpperCase()} audio net... Changing track to "${directMusic.songQuery}"!`
-          : `Jacking into ${directMusic.platform.toUpperCase()} audio net... Queuing "${directMusic.songQuery}"!`
+          ? `Jacking into ${musicPlatformName(directMusic.platform)} audio net... Changing track to "${directMusic.songQuery}"!`
+          : `Jacking into ${musicPlatformName(directMusic.platform)} audio net... Queuing "${directMusic.songQuery}"!`
       )
       this.emitAssistant(
         isSpanish
           ? (directMusic.isChange
-              ? `¡Listo! Cambié a "${directMusic.songQuery}" en Spotify, choomba. ¡A subir el volumen!`
-              : `¡Listo! Puse "${directMusic.songQuery}" en ${directMusic.platform === 'spotify' ? 'Spotify' : 'YouTube'}, choomba. ¡A disfrutar!`)
+              ? `¡Listo! Cambié a "${directMusic.songQuery}" en ${playbackName}, choomba. ¡A subir el volumen!`
+              : `¡Listo! Puse "${directMusic.songQuery}" en ${musicPlatformName(directMusic.platform)}, choomba. ¡A disfrutar!`)
           : (directMusic.isChange
-              ? `Boom! Switched track to "${directMusic.songQuery}" on Spotify, choomba! Turn up the sound and enjoy!`
-              : `Boom! Queued up "${directMusic.songQuery}" on ${directMusic.platform === 'spotify' ? 'Spotify' : 'YouTube'}, choomba! Turn up the sound and enjoy!`)
+              ? `Boom! Switched track to "${directMusic.songQuery}" on ${playbackName}, choomba! Turn up the sound and enjoy!`
+              : `Boom! Queued up "${directMusic.songQuery}" on ${musicPlatformName(directMusic.platform)}, choomba! Turn up the sound and enjoy!`)
       )
       this.finishSession()
       return
@@ -1165,8 +1168,8 @@ export class CapriLocalAgent extends EventEmitter {
       /(?:pon|pone|play)\s+(?:otra|siguiente)\s+(?:cancion|canción|tema|musica|música|track|song)/i.test(trimmed) ||
       /^(?:skip|next)\s*(?:song|track)?$/i.test(trimmed) ||
       /^(?:cambia\s+de\s+cancion|cambia\s+la\s+cancion|pasa\s+de\s+cancion|pasa\s+la\s+cancion|salta\s+la\s+cancion)$/i.test(trimmed) ||
-      /(?:spotify).*(?:cambia|pasa|salta|skip|next|otra|siguiente)/i.test(trimmed) ||
-      /(?:cambia|pasa|salta|skip|next).*(?:spotify)/i.test(trimmed)
+      /(?:spotify|youtube(?:[ _]+music)?).*(?:cambia|pasa|salta|skip|next|otra|siguiente)/i.test(trimmed) ||
+      /(?:cambia|pasa|salta|skip|next).*(?:spotify|youtube(?:[ _]+music)?)/i.test(trimmed)
 
     const isPrevSongIntent =
       /(?:anterior|previa|prev)\s+(?:cancion|canción|tema|track|song)/i.test(trimmed) ||
@@ -1174,31 +1177,31 @@ export class CapriLocalAgent extends EventEmitter {
       /^(?:prev|previous)\s*(?:song|track)?$/i.test(trimmed)
 
     const isPauseIntent =
-      /^(?:pausa|pausar|pause|mute|deten|detener|para|parar|frena|frenar|stop)(?:\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|cancion|canción|music|song|track))?$/i.test(trimmed) ||
-      /(?:pausa|pausar|pause|mute|deten|detener|para|parar|frena|frenar|stop)\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|cancion|canción|music|song|track)/i.test(trimmed)
+      /^(?:pausa|pausar|pause|mute|deten|detener|para|parar|frena|frenar|stop)(?:\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|youtube(?:[ _]+music)?|cancion|canción|music|song|track))?$/i.test(trimmed) ||
+      /(?:pausa|pausar|pause|mute|deten|detener|para|parar|frena|frenar|stop)\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|youtube(?:[ _]+music)?|cancion|canción|music|song|track)/i.test(trimmed)
 
     const isPlayMusicOnlyIntent =
-      /^(?:pon|pone|reproduce|reproducir|play|reanuda|reanudar|despausa|despausar|continua|continuar|sigue|seguir|resume)(?:\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|cancion|canción|music|song|playback))?$/i.test(trimmed) ||
-      /(?:reanuda|reanudar|despausa|despausar|continua|continuar|resume)\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|cancion|canción|music|song|playback)/i.test(trimmed) ||
+      /^(?:pon|pone|reproduce|reproducir|play|reanuda|reanudar|despausa|despausar|continua|continuar|sigue|seguir|resume)(?:\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|youtube(?:[ _]+music)?|cancion|canción|music|song|playback))?$/i.test(trimmed) ||
+      /(?:reanuda|reanudar|despausa|despausar|continua|continuar|resume)\s+(?:la\s+|el\s+|the\s+)?(?:musica|música|spotify|youtube(?:[ _]+music)?|cancion|canción|music|song|playback)/i.test(trimmed) ||
       /^(?:play|resume|pon\s+musica|pone\s+musica|reproduce\s+musica|play\s+music|reanuda\s+musica|reanudar\s+musica|despausa\s+musica|despausar\s+musica)$/i.test(trimmed)
 
     if (isChangeSongIntent || isPrevSongIntent || isPauseIntent || isPlayMusicOnlyIntent) {
-      // If user specified an explicit target song, e.g. "now change the song to Bohemian Rhapsody", route directly to play on Spotify
+      // If user specified an explicit target song, e.g. "now change the song to Bohemian Rhapsody", route directly to the requested platform
       const specificChange = trimmed
         .replace(/^(?:now|hey|capri|por\s+favor|please|ok|oye|bueno|ahora)\s*,?\s*/i, '')
         .match(/^(?:change|switch|cambia|cambiar|cambie|pasa|pasar)\s+(?:the\s+|la\s+|el\s+|de\s+)?(?:cancion|canción|tema|musica|música|pista|track|song)?\s*(?:to|a|por)\s+(.+)/i)
       if (specificChange && specificChange[1].trim() && !/^(?:spotify|otra|siguiente|next)$/i.test(specificChange[1].trim())) {
-        const targetSong = specificChange[1].trim().replace(/\s+(?:on|en)\s+spotify$/i, '')
+        const targetSong = specificChange[1].trim().replace(/\s+(?:on|en)\s+(?:spotify|youtube(?:[ _]+music)?)$/i, '')
         await this.runSingleTool(
           'open_application',
-          { appOrUrl: 'spotify', query: targetSong, isChange: true },
+          { appOrUrl: playbackPlatform, query: targetSong, isChange: true },
           projectPath,
-          `Jacking into Spotify audio net... Changing track to "${targetSong}"!`
+          `Jacking into ${playbackName} audio net... Changing track to "${targetSong}"!`
         )
         this.emitAssistant(
           isSpanish
-            ? `¡Listo! Cambié a "${targetSong}" en Spotify, choomba. ¡A subir el volumen!`
-            : `Boom! Switched track to "${targetSong}" on Spotify, choomba! Turn up the sound and enjoy!`
+            ? `¡Listo! Cambié a "${targetSong}" en ${playbackName}, choomba. ¡A subir el volumen!`
+            : `Boom! Switched track to "${targetSong}" on ${playbackName}, choomba! Turn up the sound and enjoy!`
         )
         this.finishSession()
         return
@@ -1207,31 +1210,31 @@ export class CapriLocalAgent extends EventEmitter {
       const action = isPrevSongIntent ? 'prev' : isPauseIntent ? 'pause' : isPlayMusicOnlyIntent ? 'play' : 'next'
       await this.runSingleTool(
         'media_control',
-        { action },
+        { action, appOrUrl: playbackPlatform },
         projectPath,
         action === 'next'
-          ? 'Skipping to the next track on Spotify audio net...'
+          ? `Skipping to the next track on ${playbackName} audio net...`
           : action === 'prev'
-          ? 'Rewinding to the previous track on Spotify...'
+          ? `Rewinding to the previous track on ${playbackName}...`
           : action === 'pause'
-          ? 'Pausing Spotify playback...'
-          : 'Resuming Spotify playback...'
+          ? `Pausing ${playbackName} playback...`
+          : `Resuming ${playbackName} playback...`
       )
       const phrase = isSpanish
         ? (action === 'next'
-            ? "¡Pista saltada! Ya está sonando el siguiente tema en Spotify, choomba. ¡A romperla!"
+            ? `¡Pista saltada! Ya está sonando el siguiente tema en ${playbackName}, choomba. ¡A romperla!`
             : action === 'prev'
-            ? "¡Volviendo al tema anterior en Spotify, {name}!"
+            ? `¡Volviendo al tema anterior en ${playbackName}, {name}!`
             : action === 'pause'
-            ? "¡Spotify pausado, choomba! En espera en la red."
-            : "¡Spotify sonando a tope, {name}! Subí los parlantes.")
+            ? `¡${playbackName} pausado, choomba! En espera en la red.`
+            : `¡${playbackName} sonando a tope, {name}! Subí los parlantes.`)
         : (action === 'next'
-            ? "Track skipped! Next tune spinning on Spotify, choomba. Turn up the chrome!"
+            ? `Track skipped! Next tune spinning on ${playbackName}, choomba. Turn up the chrome!`
             : action === 'prev'
             ? "Rewound to the previous track! Back to the groove, {name}."
             : action === 'pause'
-            ? "Spotify paused! Standing by in the static, choomba."
-            : "Cranking the audio net! Spotify is blasting, {name}!")
+            ? `${playbackName} paused! Standing by in the static, choomba.`
+            : `Cranking the audio net! ${playbackName} is blasting, {name}!`)
       this.emitAssistant(phrase)
       this.finishSession()
       return
@@ -1503,7 +1506,7 @@ TOOL EXECUTION (CRITICAL):
 - You can only read and edit plain-text files. NEVER call read_file, edit_file or write_file on Word, Excel, PowerPoint, PDF, image or other binary files: tell the user you cannot edit that format. Never claim you edited something you did not, and never call edit_file with an empty target.
 - When running shell commands, invoke 'run_command'!
 - CONVERSATIONAL CONTEXT - MUSIC & SPOTIFY vs GAMES:
-  * When the user asks to play music or search a song (e.g. "play <song> on spotify", "play <song>", "change the song to <song>", "now change the song to <song>", "reproduce <cancion>", "pon <cancion>", "cambia la cancion a <cancion>"): invoke the "open_application" tool with { appOrUrl: "spotify", query: "<song_name>" } (default to Spotify unless YouTube is explicitly mentioned). NEVER invoke media_control with "next" when a song name is given!
+  * When the user asks to play music or search a song (e.g. "play <song> on spotify", "play <song>", "change the song to <song>", "now change the song to <song>", "reproduce <cancion>", "pon <cancion>", "cambia la cancion a <cancion>"): invoke the "open_application" tool with { appOrUrl: "music", query: "<song_name>" } (uses the preferred music platform; an explicitly requested "spotify", "youtube music", or "youtube" wins). NEVER invoke media_control with "next" when a song name is given!
   * When the user asks to skip track, next song, pause, or resume playback WITHOUT specifying a new song (e.g. "cambia la cancion", "cambie la musica", "siguiente cancion", "next song", "skip", "pause", "resume"): invoke the "media_control" tool with { action: "next" } (or "prev", "play", "pause").
   * When the user asks to search something in the browser or on the web (e.g. "busca en el navegador <query>", "hace una busqueda en el navegador de <query>", "googlea <query>"): invoke the "open_application" tool with { appOrUrl: "browser_search", query: "<query>" }.
   * When the user asks to open or play any game (e.g. "abre el lol", "abre league of legends", "abre cyberpunk", "abre valorant", "abre palworld", "abre roblox"): invoke the "open_application" tool with { appOrUrl: "<game_name>" }.
@@ -1789,39 +1792,41 @@ LANGUAGE RULE: ${langDirective}`
             const isEs = detectedLang === 'es'
             const isPt = detectedLang === 'pt'
 
+            const resultPlatform = resolveMusicPlatform(String(fnArgs.appOrUrl || ''))
+            const resultPlatformName = musicPlatformName(resultPlatform)
             if (result.success && fnName === 'media_control') {
               this.emit('event', {
                 type: 'assistant.delta',
                 text: isPt
-                  ? 'Música pulada! Próxima faixa tocando no Spotify, choomba.'
+                  ? `Música pulada! Próxima faixa tocando no ${resultPlatformName}, choomba.`
                   : isEs
-                  ? '¡Pista saltada! Siguiente tema girando en Spotify, choomba.'
-                  : 'Track skipped! Next tune spinning on Spotify, choomba!',
+                  ? `¡Pista saltada! Siguiente tema girando en ${resultPlatformName}, choomba.`
+                  : `Track skipped! Next tune spinning on ${resultPlatformName}, choomba!`,
                 timestamp: Date.now()
               } as AgentEventPayload)
             } else if (result.success && fnName === 'open_application') {
               const appName = String(fnArgs.appOrUrl || 'la aplicación')
-              const isSpotify = /spotify/i.test(appName) || /spotify/i.test(String(fnArgs.query || ''))
+              const isMusic = /spotify|youtube|music|musica|música/i.test(appName) || (!fnArgs.appOrUrl && !!fnArgs.query)
               let textMsg = ''
               if (isPt) {
-                if (isSpotify && fnArgs.query) {
-                  textMsg = `Coloquei "${fnArgs.query}" no Spotify, choomba! Aumenta o som aí.`
-                } else if (isSpotify) {
-                  textMsg = 'Spotify aberto e pronto, choomba! Bora curtir o som.'
+                if (isMusic && fnArgs.query) {
+                  textMsg = `Coloquei "${fnArgs.query}" no ${resultPlatformName}, choomba! Aumenta o som aí.`
+                } else if (isMusic) {
+                  textMsg = `${resultPlatformName} aberto e pronto, choomba! Bora curtir o som.`
                 } else {
                   textMsg = `Alvo invadido! Entramos direto no ${appName}, choomba.`
                 }
               } else if (isEs) {
-                if (isSpotify && fnArgs.query) {
-                  textMsg = `¡Puse "${fnArgs.query}" en Spotify, choomba! A subir el volumen.`
-                } else if (isSpotify) {
-                  textMsg = '¡Spotify abierto y listo, choomba! Que suene la música.'
+                if (isMusic && fnArgs.query) {
+                  textMsg = `¡Puse "${fnArgs.query}" en ${resultPlatformName}, choomba! A subir el volumen.`
+                } else if (isMusic) {
+                  textMsg = `¡${resultPlatformName} abierto y listo, choomba! Que suene la música.`
                 } else {
                   textMsg = `¡Objetivo vulnerado! Entramos directo a ${appName}, choomba.`
                 }
               } else {
-                if (isSpotify && fnArgs.query) {
-                  textMsg = `Queued up "${fnArgs.query}" on Spotify, choomba! Crank up the volume.`
+                if (isMusic && fnArgs.query) {
+                  textMsg = `Queued up "${fnArgs.query}" on ${resultPlatformName}, choomba! Crank up the volume.`
                 } else {
                   textMsg = `Target breached! Blasted straight into ${appName}, choomba!`
                 }
@@ -1942,6 +1947,8 @@ LANGUAGE RULE: ${langDirective}`
     const p = prompt.trim()
     const lower = p.toLowerCase()
     const isSpanish = CapriLocalAgent.detectLanguage(p) === 'es'
+    const playbackPlatform = resolveMusicPlatform(p)
+    const playbackName = musicPlatformName(playbackPlatform)
 
     // Change / Skip track on Spotify
     // Handles: "cambia la musica", "cambie la musica", "cambiar musica", "cambia de cancion", "cambia la cancion", "cambia de tema", "pasa la cancion", "siguiente cancion", "skip song", "next song", etc.
@@ -1953,9 +1960,9 @@ LANGUAGE RULE: ${langDirective}`
     if (isChangeOrSkipMusic) {
       await this.runSingleTool(
         'media_control',
-        { action: 'next' },
+        { action: 'next', appOrUrl: playbackPlatform },
         projectPath,
-        'Skipping track on Spotify audio net...'
+        `Skipping track on ${playbackName} audio net...`
       )
 
       // Randomly (~35% of the time), Capri mentions she loves the song that's currently playing
@@ -1964,26 +1971,26 @@ LANGUAGE RULE: ${langDirective}`
         const compliments = isSpanish
           ? [
               "Ooh, ¡la verdad es que me encanta este tema! Pero te pongo el siguiente igual, choomba.",
-              "¡Siguiente tema girando en Spotify! Aunque tenía tremenda vibra, ¡que siga la música!",
+              `¡Siguiente tema girando en ${playbackName}! Aunque tenía tremenda vibra, ¡que siga la música!`,
               "¡Pista saltada! Ese ritmo estaba mortal, choomba. ¡A ver qué viene ahora!"
             ]
           : [
               "Ooh, I actually really love this track! Spinning the next one for you anyway, choomba!",
-              "Next tune spinning on Spotify! Kinda dig this vibe though, let's keep the net humming!",
+              `Next tune spinning on ${playbackName}! Kinda dig this vibe though, let's keep the net humming!`,
               "Track skipped! That beat was killer though, choomba. Let's see what's up next!"
             ]
         this.emitAssistant(compliments[Math.floor(Math.random() * compliments.length)])
       } else {
         const responses = isSpanish
           ? [
-              "¡Pista saltada! Siguiente tema girando en Spotify. ¡A romperla, choomba!",
-              "¡Pasé al siguiente tema en Spotify! Subí el volumen, {name}.",
-              "¡Siguiente tema listo y sonando en Spotify! ¿Qué sigue en la lista, choomba?"
+              `¡Pista saltada! Siguiente tema girando en ${playbackName}. ¡A romperla, choomba!`,
+              `¡Pasé al siguiente tema en ${playbackName}! Subí el volumen, {name}.`,
+              `¡Siguiente tema listo y sonando en ${playbackName}! ¿Qué sigue en la lista, choomba?`
             ]
           : [
-              "Track skipped! Next tune spinning on Spotify. Let's get this party rolling, choomba!",
-              "Skipped to the next track on Spotify! Crank up the volume, {name}.",
-              "Next track queued up and blasting on Spotify! What's next on our hit list, choomba?"
+              `Track skipped! Next tune spinning on ${playbackName}. Let's get this party rolling, choomba!`,
+              `Skipped to the next track on ${playbackName}! Crank up the volume, {name}.`,
+              `Next track queued up and blasting on ${playbackName}! What's next on our hit list, choomba?`
             ]
         this.emitAssistant(responses[Math.floor(Math.random() * responses.length)])
       }
@@ -2133,14 +2140,14 @@ LANGUAGE RULE: ${langDirective}`
       if (musicInfo.songQuery === '__NEXT_TRACK__' || /^(?:cambia|skip|next|otra|siguiente)/i.test(musicInfo.songQuery)) {
         await this.runSingleTool(
           'media_control',
-          { action: 'next' },
+          { action: 'next', appOrUrl: musicInfo.platform },
           projectPath,
-          'Skipping track on Spotify audio net...'
+          `Skipping track on ${musicPlatformName(musicInfo.platform)} audio net...`
         )
         this.emitAssistant(
           isSpanish
-            ? "¡Pista saltada! Siguiente tema girando en Spotify. ¡A romperla, choomba!"
-            : "Track skipped! Next tune spinning on Spotify. Let's get this party rolling, choomba!"
+            ? `¡Pista saltada! Siguiente tema girando en ${musicPlatformName(musicInfo.platform)}. ¡A romperla, choomba!`
+            : `Track skipped! Next tune spinning on ${musicPlatformName(musicInfo.platform)}. Let's get this party rolling, choomba!`
         )
         this.finishSession()
         return
@@ -2150,12 +2157,12 @@ LANGUAGE RULE: ${langDirective}`
         'open_application',
         { appOrUrl: musicInfo.platform, query: musicInfo.songQuery },
         projectPath,
-        `Jacking into ${musicInfo.platform.toUpperCase()} audio net... Queuing "${musicInfo.songQuery}"!`
+        `Jacking into ${musicPlatformName(musicInfo.platform)} audio net... Queuing "${musicInfo.songQuery}"!`
       )
       this.emitAssistant(
         isSpanish
-          ? `¡Listo! Puse "${musicInfo.songQuery}" en ${musicInfo.platform === 'spotify' ? 'Spotify' : 'YouTube'}, choomba. ¡A subir el volumen!`
-          : `Boom! Queued up "${musicInfo.songQuery}" on ${musicInfo.platform === 'spotify' ? 'Spotify' : 'YouTube'}. Let's blast some tunes, choomba!`
+          ? `¡Listo! Puse "${musicInfo.songQuery}" en ${musicPlatformName(musicInfo.platform)}, choomba. ¡A subir el volumen!`
+          : `Boom! Queued up "${musicInfo.songQuery}" on ${musicPlatformName(musicInfo.platform)}. Let's blast some tunes, choomba!`
       )
       this.finishSession()
       return
@@ -2180,7 +2187,7 @@ LANGUAGE RULE: ${langDirective}`
         if (query === '__NEXT_TRACK__' || /^(?:cambia|skip|next|otra|siguiente)/i.test(query)) {
           await this.runSingleTool(
             'media_control',
-            { action: 'next' },
+            { action: 'next', appOrUrl: 'spotify' },
             projectPath,
             'Skipping track on Spotify audio net...'
           )
@@ -2217,9 +2224,8 @@ LANGUAGE RULE: ${langDirective}`
         appOrUrl = 'chrome'
         url = 'https://www.youtube.com'
       } else if (lowerTarget.includes('youtube')) {
-        appOrUrl = 'chrome'
-        url = 'https://www.youtube.com'
-      } else if (/\bobs\b/.test(lowerTarget)) {
+        appOrUrl = resolveMusicPlatform(lowerTarget)
+      } else if (/obs/.test(lowerTarget)) {
         appOrUrl = 'obs'
       } else if (lowerTarget.includes('steam')) {
         appOrUrl = 'steam'
@@ -3575,10 +3581,16 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     return null
   }
 
-  private parseMusicRequest(input: string): { platform: 'spotify' | 'youtube'; songQuery: string | null; isChange?: boolean } | null {
+  private parseMusicRequest(input: string): { platform: PlaybackPlatform; songQuery: string | null; isChange?: boolean } | null {
     const text = input.trim()
     const isSpotify = /spotify/i.test(text)
     const isYouTube = /youtube/i.test(text)
+    if (/^(?:(?:abre|abrir|open|launch)\s+)?(?:spotify|youtube(?:[ _]+music)?)$/i.test(text)) {
+      return { platform: resolveMusicPlatform(text), songQuery: null }
+    }
+    if (/^(?:pon|pone|reproduce|reproducir|play|reanuda|reanudar|continua|continuar|resume)\s+(?:la\s+|el\s+|the\s+)?(?:spotify|youtube(?:[ _]+music)?)$/i.test(text)) {
+      return null
+    }
     const cleanText = text.replace(/^(?:now|hey|capri|por\s+favor|please|ok|oye|bueno|ahora)\s*,?\s*/i, '').trim()
 
     // Pattern 0: "change/switch/cambia the song/track/cancion to/a <target_song>"
@@ -3588,10 +3600,9 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     )
     if (changeSongMatch && changeSongMatch[1].trim()) {
       let target = changeSongMatch[1].trim()
-      let plat: 'spotify' | 'youtube' = 'spotify'
+      const plat = resolveMusicPlatform(text)
       if (/(?:on|en|in)\s+youtube/i.test(target)) {
-        plat = 'youtube'
-        target = target.replace(/(?:\s+(?:on|en|in)\s+youtube)$/i, '').trim()
+        target = target.replace(/(?:\s+(?:on|en|in)\s+youtube(?:[ _]+music)?)$/i, '').trim()
       } else {
         target = target.replace(/(?:\s+(?:on|en|in)\s+spotify)$/i, '').trim()
       }
@@ -3613,26 +3624,26 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     }
 
     let songQuery = ''
-    let explicitPlatform: 'spotify' | 'youtube' | null = isYouTube && !isSpotify ? 'youtube' : isSpotify && !isYouTube ? 'spotify' : null
+    let explicitPlatform: PlaybackPlatform | null = isYouTube || isSpotify ? resolveMusicPlatform(text) : null
 
     // Pattern 1: Verb + [words] + query + on/en/in (spotify|youtube)
     // Examples: "put me videos of cats on youtube", "put i really wanna stay at your house on spotify", "ponme videos de gatos en youtube", "play bohemian rhapsody on spotify"
     let m = cleanText.match(
-      /(?:reproduce|reproduzca|reproducir|reproducila|reproducile|play|pone|pon|ponme|ponete|put\s+me|put|toca|tocar|busca|buscar|search|show\s+me|show|quiero\s+escuchar|quiero\s+ver)\s+(?:la\s+cancion\s+|el\s+tema\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+|musica\s+de\s+|canciones\s+de\s+)?(.+?)\s+(?:en\s+|on\s+|in\s+)(spotify|youtube)/i
+      /(?:reproduce|reproduzca|reproducir|reproducila|reproducile|play|pone|pon|ponme|ponete|put\s+me|put|toca|tocar|busca|buscar|search|show\s+me|show|quiero\s+escuchar|quiero\s+ver)\s+(?:la\s+cancion\s+|el\s+tema\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+|musica\s+de\s+|canciones\s+de\s+)?(.+?)\s+(?:en\s+|on\s+|in\s+)(spotify|youtube[ _]+music|youtube(?![ _]+music))/i
     )
     if (m) {
       songQuery = m[1]
-      explicitPlatform = m[2].toLowerCase() === 'youtube' ? 'youtube' : 'spotify'
+      explicitPlatform = resolveMusicPlatform(m[2])
     }
 
     // Pattern 2: Verb + on/en/in (spotify|youtube) + query
     // Examples: "put on spotify i really wanna stay at your house", "play on youtube videos of cats", "reproduce en spotify bohemian rhapsody"
     if (!songQuery) {
       m = cleanText.match(
-        /(?:reproduce|reproduzca|reproducir|reproducila|reproducile|play|pone|pon|ponme|ponete|put\s+me|put|toca|tocar|busca|buscar|search|show\s+me|show)\s+(?:on|in|en)\s+(spotify|youtube)\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|el\s+video\s+|the\s+song\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
+        /(?:reproduce|reproduzca|reproducir|reproducila|reproducile|play|pone|pon|ponme|ponete|put\s+me|put|toca|tocar|busca|buscar|search|show\s+me|show)\s+(?:on|in|en)\s+(spotify|youtube[ _]+music|youtube(?![ _]+music))\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|el\s+video\s+|the\s+song\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
       )
       if (m) {
-        explicitPlatform = m[1].toLowerCase() === 'youtube' ? 'youtube' : 'spotify'
+        explicitPlatform = resolveMusicPlatform(m[1])
         songQuery = m[2]
       }
     }
@@ -3640,10 +3651,10 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     // Pattern 3: "abre spotify/youtube y reproduce/busca <song>"
     if (!songQuery) {
       m = cleanText.match(
-        /(?:abre|abrir|open|launch)\s+(spotify|youtube)\s+(?:y\s+|and\s+)?(?:reproduce|reproduzca|reproducir|reproducila|play|pone|pon|ponme|put|toca|tocar|busca|buscar|search)\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
+        /(?:abre|abrir|open|launch)\s+(spotify|youtube[ _]+music|youtube(?![ _]+music))\s+(?:y\s+|and\s+)?(?:reproduce|reproduzca|reproducir|reproducila|play|pone|pon|ponme|put|toca|tocar|busca|buscar|search)\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
       )
       if (m) {
-        explicitPlatform = m[1].toLowerCase() === 'youtube' ? 'youtube' : 'spotify'
+        explicitPlatform = resolveMusicPlatform(m[1])
         songQuery = m[2]
       }
     }
@@ -3651,10 +3662,10 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     // Pattern 4: "en/on spotify/youtube <verb> <query>"
     if (!songQuery) {
       m = cleanText.match(
-        /(?:en\s+|on\s+|in\s+)(spotify|youtube)\s+(?:reproduce|reproduzca|reproducir|reproducila|play|pone|pon|ponme|put|toca|tocar|busca|buscar|search)\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
+        /(?:en\s+|on\s+|in\s+)(spotify|youtube[ _]+music|youtube(?![ _]+music))\s+(?:reproduce|reproduzca|reproducir|reproducila|play|pone|pon|ponme|put|toca|tocar|busca|buscar|search)\s+(?:la\s+cancion\s+|el\s+tema\s+|la\s+musica\s+|the\s+song\s+|el\s+video\s+|the\s+video\s+|videos?\s+de\s+|videos?\s+of\s+)?(.+)/i
       )
       if (m) {
-        explicitPlatform = m[1].toLowerCase() === 'youtube' ? 'youtube' : 'spotify'
+        explicitPlatform = resolveMusicPlatform(m[1])
         songQuery = m[2]
       }
     }
@@ -3662,20 +3673,20 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     // Pattern 5: "busca una cancion y la reproduzca en spotify" / "busca <song> y reproducila en spotify"
     if (!songQuery) {
       m = cleanText.match(
-        /(?:busca|buscar|search)\s+(?:una\s+cancion|un\s+tema|la\s+cancion|the\s+song)?\s*(.+?)\s*(?:y\s+|and\s+)?(?:la\s+reproduzca|la\s+reproduce|reproducila|reproducile|reproduce|play)\s*(?:en|on)?\s*(spotify|youtube)?/i
+        /(?:busca|buscar|search)\s+(?:una\s+cancion|un\s+tema|la\s+cancion|the\s+song)?\s*(.+?)\s*(?:y\s+|and\s+)?(?:la\s+reproduzca|la\s+reproduce|reproducila|reproducile|reproduce|play)\s*(?:en|on)?\s*(spotify|youtube[ _]+music|youtube(?![ _]+music))?/i
       )
       if (m && m[1].trim()) {
         songQuery = m[1]
-        if (m[2]) explicitPlatform = m[2].toLowerCase() === 'youtube' ? 'youtube' : 'spotify'
+        if (m[2]) explicitPlatform = resolveMusicPlatform(m[2])
       }
     }
 
     // Pattern 6: "spotify <song>" or "youtube <query>"
     if (!songQuery && (isSpotify || isYouTube)) {
-      m = cleanText.match(/^(?:spotify|youtube)\s+(?:reproduce|play|search|busca|song|video)?\s*(.+)/i)
+      m = cleanText.match(/^(?:spotify|youtube(?:[ _]+music)?)\s+(?:reproduce|play|search|busca|song|video)?\s*(.+)/i)
       if (m && m[1].trim() && !/^(?:app|client)$/i.test(m[1].trim())) {
         songQuery = m[1]
-        explicitPlatform = isYouTube ? 'youtube' : 'spotify'
+        explicitPlatform = resolveMusicPlatform(text)
       }
     }
 
@@ -3687,8 +3698,8 @@ DIRECTIVES FOR FORMATTING AND REASONING:
 
     if (songQuery) {
       songQuery = songQuery.replace(/^[“"']+|[”"'.?!]+$/g, '').trim()
-      songQuery = songQuery.replace(/^(?:on\s+spotify|en\s+spotify|in\s+spotify|on\s+youtube|en\s+youtube|in\s+youtube)\s*/i, '').trim()
-      songQuery = songQuery.replace(/(?:\s+(?:on|en|in)\s+(?:spotify|youtube))$/i, '').trim()
+      songQuery = songQuery.replace(/^(?:on|en|in)\s+(?:spotify|youtube(?:[ _]+music)?)\s*/i, '').trim()
+      songQuery = songQuery.replace(/(?:\s+(?:on|en|in)\s+(?:spotify|youtube(?:[ _]+music)?))$/i, '').trim()
       songQuery = songQuery.replace(/^(?:la\s+cancion\s+(?:de\s+)?|el\s+tema\s+(?:de\s+)?|the\s+song\s+(?:from\s+)?|una\s+cancion\s+(?:de\s+)?|un\s+tema\s+(?:de\s+)?|de\s+)/i, '').trim()
       songQuery = songQuery.replace(/^[“"']+|[”"'.?!]+$/g, '').trim()
 
@@ -3703,7 +3714,7 @@ DIRECTIVES FOR FORMATTING AND REASONING:
       }
     }
 
-    const platform = explicitPlatform || (isYouTube || text.toLowerCase().includes('video') ? 'youtube' : 'spotify')
+    const platform = explicitPlatform || (text.toLowerCase().includes('video') ? 'youtube' : resolveMusicPlatform(text))
     return {
       platform,
       songQuery: songQuery || null
@@ -4072,6 +4083,13 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     return false
   }
 
+  private formatYoutubeMusicReaction(music: ActiveMediaInfo, es: boolean): string {
+    const artist = music.artist ? ` (${music.artist})` : ''
+    return es
+      ? `¡Estás escuchando "${music.track || music.title}"${artist} en YouTube Music, choomba!`
+      : `You're listening to "${music.track || music.title}"${artist} on YouTube Music, choomba!`
+  }
+
   private formatSpotifyReaction(spotify: any, isSpanish?: boolean): string {
     const artist = spotify.artist || spotify.creator
     const track = spotify.track || spotify.title
@@ -4294,6 +4312,17 @@ DIRECTIVES FOR FORMATTING AND REASONING:
     const isReelsQuery = /(?:reel|reels|instagram)/i.test(lower)
     const isBrowserQuery = /(?:google|browser|navegador|search|busqueda|búsqueda|page|p[aá]gina|website|web|tab)/i.test(lower)
 
+    const isYoutubeMusicQuery = /youtube[ _]+music/i.test(lower)
+    if (isYoutubeMusicQuery || (isSpotifyQuery && !/spotify/i.test(lower) && !isYoutubeQuery)) {
+      const music = await systemObserver.getActiveMediaAsync('youtube_music')
+      if (music) return this.formatYoutubeMusicReaction(music, es)
+      if (isYoutubeMusicQuery) {
+        return es
+          ? 'No detecto una canción en YouTube Music ahora, choomba.'
+          : "I can't detect a song on YouTube Music right now, choomba."
+      }
+    }
+
     // Music / Song / Audio question
     if (isSpotifyQuery && !isYoutubeQuery) {
       const spotify = await systemObserver.getActiveMediaAsync('spotify')
@@ -4423,6 +4452,9 @@ DIRECTIVES FOR FORMATTING AND REASONING:
           : `Streaming "${videoMedia.title}"! Pop some popcorn, choomba, let's see where this plot goes!`
       }
     }
+
+    const music = await systemObserver.getActiveMediaAsync('youtube_music')
+    if (music) return this.formatYoutubeMusicReaction(music, es)
 
     const browserMedia = await systemObserver.getActiveMediaAsync('browser')
     if (browserMedia) {

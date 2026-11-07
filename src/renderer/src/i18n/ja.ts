@@ -1,6 +1,8 @@
 import type { Messages } from './en'
 
 export const ja: Messages = {
+  music_platformTitle: '音楽プラットフォーム',
+  music_platformHelp: 'Capriに音楽の再生を頼むときに使用します。プラットフォーム名を指定することもできます。',
   close: '閉じる',
   done: '完了',
   saved: '保存しました',
