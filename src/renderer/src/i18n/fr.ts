@@ -334,5 +334,13 @@ export const fr: Messages = {
   vs_stDone: 'Test terminé.',
   vs_stPlayError: 'Lecture de l’audio de test impossible.',
   vs_stSynthError: 'Échec de la synthèse : {error}',
-  vs_stReset: 'Valeurs de Capri rétablies.'
+  vs_stReset: 'Valeurs de Capri rétablies.',
+
+// System prompt editor (Capri // Brain settings)
+  sp_title: 'System prompt (personality)',
+  sp_hint: 'This is who Capri is. Write {name} where her name for you should go. Her tool, voice and look rules are always added after this text, and the change applies from your next message.',
+  sp_custom: 'Custom',
+  sp_default: 'Default',
+  sp_reset: 'Restore default',
+  sp_chars: '{n} characters'
 }

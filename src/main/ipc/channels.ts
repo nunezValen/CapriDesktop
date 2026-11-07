@@ -77,6 +77,9 @@ export const IPC_CHANNELS = {
   AGENT_SET_CONFIG: 'agent:setConfig',
   AGENT_DETECT_OLLAMA: 'agent:detectOllama',
   AGENT_CLEAR_HISTORY: 'agent:clearHistory',
+  // adds editable system prompt (Capri // Brain settings)
+  AGENT_GET_SYSTEM_PROMPT: 'agent:getSystemPrompt',
+  AGENT_SET_SYSTEM_PROMPT: 'agent:setSystemPrompt',
   LLM_GET_SETTINGS: 'llm:getSettings',
   LLM_SET_SETTINGS: 'llm:setSettings',
   LLM_LIST_MODELS: 'llm:listModels',
@@ -170,6 +173,13 @@ export interface AgentConfigPayload {
   endpoint: string
   model: string
   apiKey: string
+}
+
+// What the settings window needs to show and edit the system prompt
+export interface SystemPromptPayload {
+  prompt: string
+  defaultPrompt: string
+  isCustom: boolean
 }
 
 export interface AgentEventPayload {

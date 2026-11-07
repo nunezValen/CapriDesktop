@@ -334,5 +334,13 @@ export const zh: Messages = {
   vs_stDone: '测试完成。',
   vs_stPlayError: '无法播放测试音频。',
   vs_stSynthError: '合成失败:{error}',
-  vs_stReset: '已恢复 Capri 的默认值。'
+  vs_stReset: '已恢复 Capri 的默认值。',
+
+// System prompt editor (Capri // Brain settings)
+  sp_title: 'System prompt (personality)',
+  sp_hint: 'This is who Capri is. Write {name} where her name for you should go. Her tool, voice and look rules are always added after this text, and the change applies from your next message.',
+  sp_custom: 'Custom',
+  sp_default: 'Default',
+  sp_reset: 'Restore default',
+  sp_chars: '{n} characters'
 }

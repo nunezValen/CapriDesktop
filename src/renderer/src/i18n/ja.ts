@@ -334,5 +334,13 @@ export const ja: Messages = {
   vs_stDone: 'テストが完了しました。',
   vs_stPlayError: 'テスト音声を再生できませんでした。',
   vs_stSynthError: '合成に失敗しました: {error}',
-  vs_stReset: 'カプリの既定値に戻しました。'
+  vs_stReset: 'カプリの既定値に戻しました。',
+
+// System prompt editor (Capri // Brain settings)
+  sp_title: 'System prompt (personality)',
+  sp_hint: 'This is who Capri is. Write {name} where her name for you should go. Her tool, voice and look rules are always added after this text, and the change applies from your next message.',
+  sp_custom: 'Custom',
+  sp_default: 'Default',
+  sp_reset: 'Restore default',
+  sp_chars: '{n} characters'
 }
