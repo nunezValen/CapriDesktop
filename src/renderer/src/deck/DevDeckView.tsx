@@ -31,6 +31,7 @@ export const DevDeckView: React.FC = () => {
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false)
   const { setEmotion, setSpeech } = useCompanionStore()
   const t = useT()
+  const [configLoaded, setConfigLoaded] = useState(false)
   const [cloudModel, setCloudModel] = useState<string | null>(null)
   const {
     isRunning,
@@ -47,11 +48,16 @@ export const DevDeckView: React.FC = () => {
   // On mount: scan for local Ollama models and ensure Capri is in eyes mode in Dev Deck
   useEffect(() => {
     if (window.api) {
+      Promise.all([window.api.agent.getConfig(), window.api.agent.getLlmSettings()]).then(([config, settings]) => {
+        setLlmConfig(config)
+        setCloudModel(settings.provider === 'cloud' ? settings.model : null)
+        setConfigLoaded(true)
+      })
       window.api.agent.detectOllama().then((res) => {
         if (res) setOllamaStatus(res)
       })
     }
-  }, [setOllamaStatus])
+  }, [setLlmConfig, setOllamaStatus])
 
   // A cloud model is chosen in the settings: the top bar only shows it
   useEffect(() => {
@@ -160,26 +166,28 @@ export const DevDeckView: React.FC = () => {
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Local Model Selector */}
-          <div
-            className="flex items-center gap-1.5 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300"
-            title={t('deck_modelTitle')}
-          >
-            <Cpu size={12} className="text-cyan-400" />
-            <span className="text-stone-500 text-[12px] uppercase">{t('deck_model')}:</span>
-            <select
-              value={cloudModel || currentModel}
-              disabled={!!cloudModel}
-              onChange={(e) => handleModelChange(e.target.value)}
-              className="bg-[#210f10] text-stone-100 font-semibold text-[14px] outline-none cursor-pointer max-w-[180px] truncate"
-              style={{ colorScheme: 'dark' }}
+          {configLoaded && (
+            <div
+              className="flex items-center gap-1.5 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300"
+              title={t('deck_modelTitle')}
             >
-              {(cloudModel ? [cloudModel] : modelOptions).map((m) => (
-                <option key={m} value={m} className="bg-[#170a0b] text-stone-200">
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
+              <Cpu size={12} className="text-cyan-400" />
+              <span className="text-stone-500 text-[12px] uppercase">{t('deck_model')}:</span>
+              <select
+                value={cloudModel || currentModel}
+                disabled={!!cloudModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                className="bg-[#210f10] text-stone-100 font-semibold text-[14px] outline-none cursor-pointer max-w-[180px] truncate"
+                style={{ colorScheme: 'dark' }}
+              >
+                {(cloudModel ? [cloudModel] : modelOptions).map((m) => (
+                  <option key={m} value={m} className="bg-[#170a0b] text-stone-200">
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* LLM settings */}
           <div className="flex items-center gap-1 bg-[#210f10] border border-[#3c1c1d] rounded-none px-2 py-0.5 text-[14px] text-stone-300">
@@ -263,7 +271,7 @@ export const DevDeckView: React.FC = () => {
       </div>
 
       {/* Settings Modal */}
-      {isSettingsOpen && (
+      {isSettingsOpen && configLoaded && (
         <AgentSettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       )}
 

@@ -1,5 +1,6 @@
+import { app } from 'electron'
 import { scriptPlayer } from '../services/script/script-player'
-import { getLlmSettings, isCloudMode } from '../services/llm-gateway'
+import { getLlmSettings, getLocalModel, isCloudMode, setLocalModel } from '../services/llm-gateway'
 import { personalize } from '../services/user-profile'
 import { consciousnessService } from '../services/consciousness-service'
 import { localizeLine } from '../../shared/lines'
@@ -45,6 +46,9 @@ export class AgentManager extends EventEmitter {
   constructor() {
     super()
     this.setupListeners(this.capriLocal)
+    app.whenReady().then(() => {
+      this.config.model = getLocalModel()
+    })
   }
 
   private setupListeners(adapter: EventEmitter): void {
@@ -215,7 +219,9 @@ export class AgentManager extends EventEmitter {
   }
 
   public setConfig(newConfig: Partial<AgentConfigPayload>): AgentConfigPayload {
-    this.config = { ...this.config, ...newConfig, mode: 'capri-local' }
+    const model = newConfig.model?.trim() || this.config.model
+    if (model !== this.config.model) setLocalModel(model)
+    this.config = { ...this.config, ...newConfig, model, mode: 'capri-local' }
     return { ...this.config }
   }
 

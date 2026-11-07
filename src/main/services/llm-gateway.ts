@@ -34,6 +34,7 @@ export interface LlmSettingsUpdate {
 }
 
 interface StoredSettings {
+  localModel?: string
   provider: LlmProvider
   preset: string
   baseUrl: string
@@ -100,6 +101,14 @@ function keyWouldLeakInClear(baseUrl: string, key: string): boolean {
 export function isCloudMode(): boolean {
   const s = load()
   return s.provider === 'cloud' && !!s.baseUrl && !!s.model
+}
+
+export function getLocalModel(): string {
+  return load().localModel || 'capri'
+}
+
+export function setLocalModel(model: string): void {
+  persist({ ...load(), localModel: model })
 }
 
 export function getLlmSettings(): LlmPublicSettings {

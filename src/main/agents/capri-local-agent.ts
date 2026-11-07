@@ -4470,7 +4470,9 @@ DIRECTIVES FOR FORMATTING AND REASONING:
 
       // The custom Capri construct is only the default when nothing specific was requested
       const capriModel = models.find((m) => m.toLowerCase().includes('capri'))
-      if (capriModel && (!requestedModel || requestedModel.toLowerCase().startsWith('capri'))) return capriModel
+      if (capriModel && (!requestedModel || requestedModel.toLowerCase().startsWith('capri'))) {
+        return this.reportModelFallback(requestedModel, capriModel)
+      }
 
       // Tag match (e.g. requested 'qwen2.5-coder', models has 'qwen2.5-coder:7b', 'latest', etc.)
       const tagMatch = models.find(
@@ -4481,13 +4483,29 @@ DIRECTIVES FOR FORMATTING AND REASONING:
           m.startsWith(requestedModel) ||
           requestedModel.startsWith(m)
       )
-      if (tagMatch) return tagMatch
+      if (tagMatch) return this.reportModelFallback(requestedModel, tagMatch)
 
       // Fallback to first available model in Ollama
-      return models[0]
+      return this.reportModelFallback(requestedModel, models[0])
     } catch {
       return null
     }
+  }
+
+  private warnedFallback = ''
+
+  private reportModelFallback(requestedModel: string, model: string): string {
+    const fallback = `${requestedModel}->${model}`
+    const isAlias = model.startsWith(requestedModel)
+    if (isCloudMode() || !requestedModel || isAlias || fallback === this.warnedFallback) return model
+    this.warnedFallback = fallback
+    const isSpanish = consciousnessService.getPreferredLanguage() === 'es'
+    this.emitAssistant(
+      isSpanish
+        ? `[worried] No encuentro el modelo "${requestedModel}" en Ollama, así que uso "${model}". Tu elección sigue guardada.\n\n`
+        : `[worried] I can't find the model "${requestedModel}" in Ollama, so I'm using "${model}". Your choice is still saved.\n\n`
+    )
+    return model
   }
 
   private async checkLlmHealth(endpoint: string): Promise<boolean> {

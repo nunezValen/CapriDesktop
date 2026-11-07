@@ -78,7 +78,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   ],
 
   llmEndpoint: 'http://localhost:11434/v1',
-  llmModel: 'qwen2.5-coder',
+  llmModel: '',
   ollamaRunning: false,
   ollamaModels: [],
   isDevVoiceEnabled: (() => {
