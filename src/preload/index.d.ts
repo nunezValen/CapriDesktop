@@ -134,6 +134,7 @@ export interface IElectronAPI {
     // Downloading local models
     pullModel: (model: string) => Promise<boolean>
     cancelPullModel: () => Promise<void>
+    importGgufModel: () => Promise<boolean>
     onPullProgress: (callback: (progress: ModelPullProgress) => void) => () => void
     // Where Cyberpunk 2077 and her mod are
     getCyberpunkFolders: () => Promise<CyberpunkFoldersState>

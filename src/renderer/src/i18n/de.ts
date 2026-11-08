@@ -424,5 +424,13 @@ export const de: Messages = {
   cp2077_kindMod: 'Mod',
   cp2077_cet: 'CET',
   cp2077_mod: 'Capri-Mod',
-  cp2077_events: 'Ereignisse kommen an'
+  cp2077_events: 'Ereignisse kommen an',
+
+  // LM Studio and .gguf models
+  llm_engine: 'Lokale Engine',
+  llm_lmStudio: 'LM Studio (.gguf-Modelle)',
+  llm_lmStudioHint: 'Öffne LM Studio, lade ein .gguf-Modell und starte den lokalen Server (Tab Developer). Capri spricht auf diesem PC mit ihm: Nichts verlässt deinen Computer.',
+  pull_importGguf: 'Eine .gguf-Datei in Ollama importieren',
+  pull_importing: 'Importiere {model} in Ollama…',
+  pull_missingFile: 'Wähl eine .gguf-Datei.'
 }

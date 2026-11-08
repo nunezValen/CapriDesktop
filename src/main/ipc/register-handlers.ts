@@ -366,6 +366,15 @@ export function registerIpcHandlers(): void {
     ollamaService.pullModel(String(model ?? ''), (progress) => windowManager.broadcast(IPC_CHANNELS.OLLAMA_PULL_PROGRESS, progress))
   )
   ipcMain.handle(IPC_CHANNELS.OLLAMA_PULL_CANCEL, () => ollamaService.cancelPull())
+  // A .gguf file on this PC, added to Ollama. The file is picked here: the window never passes a path
+  ipcMain.handle(IPC_CHANNELS.OLLAMA_IMPORT_GGUF, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const options: Electron.OpenDialogOptions = { properties: ['openFile'], filters: [{ name: 'GGUF', extensions: ['gguf'] }] }
+    const picked = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const file = picked.filePaths[0]
+    if (picked.canceled || !file) return false
+    return ollamaService.importGguf(file, (progress) => windowManager.broadcast(IPC_CHANNELS.OLLAMA_PULL_PROGRESS, progress))
+  })
 
   // Cyberpunk 2077 in any folder, or under Mod Organizer: the user can show Capri where
   ipcMain.handle(IPC_CHANNELS.CYBERPUNK_FOLDERS_GET, () => cyberpunkFoldersState())

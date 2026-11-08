@@ -424,5 +424,13 @@ export const ko: Messages = {
   cp2077_kindMod: '모드',
   cp2077_cet: 'CET',
   cp2077_mod: 'Capri 모드',
-  cp2077_events: '이벤트 수신 중'
+  cp2077_events: '이벤트 수신 중',
+
+  // LM Studio and .gguf models
+  llm_engine: '로컬 엔진',
+  llm_lmStudio: 'LM Studio (.gguf 모델)',
+  llm_lmStudioHint: 'LM Studio를 열고 .gguf 모델을 불러온 뒤 로컬 서버를 시작하세요 (Developer 탭). Capri는 이 PC 안에서 연결하며, 아무것도 밖으로 나가지 않아요.',
+  pull_importGguf: '.gguf 파일을 Ollama로 가져오기',
+  pull_importing: '{model}을(를) Ollama로 가져오는 중…',
+  pull_missingFile: '.gguf 파일을 고르세요.'
 }

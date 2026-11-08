@@ -288,6 +288,7 @@ const api = {
     // Downloading local models
     pullModel: (model: string): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_PULL, model),
     cancelPullModel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_PULL_CANCEL),
+    importGgufModel: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_IMPORT_GGUF),
     onPullProgress: (callback: (progress: ModelPullProgress) => void): (() => void) => {
       const subscription = (_event: IpcRendererEvent, progress: ModelPullProgress): void => callback(progress)
       ipcRenderer.on(IPC_CHANNELS.OLLAMA_PULL_PROGRESS, subscription)

@@ -17,6 +17,14 @@ const PRESETS: { id: string; label: string; baseUrl: string }[] = [
   { id: 'custom', label: '', baseUrl: '' }
 ]
 
+/**
+ * LM Studio runs .gguf models on this PC behind an OpenAI-compatible server. It is saved like any
+ * OpenAI-compatible provider, but shown as a local engine: nothing leaves the machine and it costs nothing.
+ */
+export const LM_STUDIO_URL = 'http://localhost:1234/v1'
+
+type LocalEngine = 'ollama' | 'lmstudio'
+
 const ERROR_KEYS: Record<string, MessageKey> = {
   auth: 'llm_errAuth',
   quota: 'llm_errQuota',
@@ -34,10 +42,11 @@ export interface LlmProviderFormHandle {
   save: () => Promise<boolean>
 }
 
-export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderChange?: (provider: 'local' | 'cloud') => void }>(
+export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderChange?: (provider: 'local' | 'cloud', engine?: LocalEngine) => void }>(
   ({ onProviderChange }, ref) => {
     const t = useT()
     const [provider, setProvider] = useState<'local' | 'cloud'>('local')
+    const [engine, setEngine] = useState<LocalEngine>('ollama')
     const [preset, setPreset] = useState('openai')
     const [baseUrl, setBaseUrl] = useState(PRESETS[0].baseUrl)
     const [model, setModel] = useState('')
@@ -50,19 +59,35 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
     useEffect(() => {
       window.api?.agent?.getLlmSettings?.().then((s) => {
         if (!s) return
-        setProvider(s.provider)
+        const lmStudio = s.provider === 'cloud' && s.preset === 'lmstudio'
+        setProvider(lmStudio ? 'local' : s.provider)
+        setEngine(lmStudio ? 'lmstudio' : 'ollama')
         if (s.preset) setPreset(s.preset)
         if (s.baseUrl) setBaseUrl(s.baseUrl)
         setModel(s.model)
         setHasKey(s.hasKey)
-        onProviderChange?.(s.provider)
+        onProviderChange?.(lmStudio ? 'local' : s.provider, lmStudio ? 'lmstudio' : 'ollama')
       })
     }, [])
 
     const choose = (next: 'local' | 'cloud') => {
       setProvider(next)
       setNotice(null)
-      onProviderChange?.(next)
+      // Coming from LM Studio, the cloud fields start from a cloud provider again
+      if (next === 'cloud' && preset === 'lmstudio') choosePreset('openai')
+      onProviderChange?.(next, next === 'local' ? engine : undefined)
+    }
+
+    const chooseEngine = (next: LocalEngine) => {
+      setEngine(next)
+      setNotice(null)
+      setModels([])
+      if (next === 'lmstudio') {
+        setPreset('lmstudio')
+        setBaseUrl(LM_STUDIO_URL)
+        setModel('')
+      }
+      onProviderChange?.('local', next)
     }
 
     const choosePreset = (id: string) => {
@@ -104,7 +129,9 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
       save: async () => {
         const res = await window.api.agent.setLlmSettings(
           provider === 'local'
-            ? { provider: 'local' }
+            ? engine === 'lmstudio'
+              ? { provider: 'cloud', preset: 'lmstudio', baseUrl, model: model.trim() }
+              : { provider: 'local' }
             : { provider: 'cloud', preset, baseUrl, model: model.trim(), apiKey: apiKey || undefined }
         )
         if (!res.success) {
@@ -145,6 +172,59 @@ export const LlmProviderForm = forwardRef<LlmProviderFormHandle, { onProviderCha
             )
           })}
         </div>
+
+        {provider === 'local' && (
+          <div className="space-y-3">
+            <label className="block">
+              <span className="cp-label block mb-1.5">{t('llm_engine')}</span>
+              <div className="cp-frame">
+                <select value={engine} onChange={(e) => chooseEngine(e.target.value as LocalEngine)} className={`${field} cursor-pointer`} style={{ colorScheme: 'dark' }}>
+                  <option value="ollama">Ollama</option>
+                  <option value="lmstudio">{t('llm_lmStudio')}</option>
+                </select>
+              </div>
+            </label>
+            {engine === 'lmstudio' && (
+              <>
+                <p className="text-[13px] leading-snug text-[var(--cp-muted)]">{t('llm_lmStudioHint')}</p>
+                <label className="block">
+                  <span className="cp-label flex items-center gap-1.5 mb-1.5">
+                    <Server size={12} /> {t('llm_baseUrl')}
+                  </span>
+                  <div className="cp-frame">
+                    <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} placeholder={LM_STUDIO_URL} className={`${field} cp-mono`} />
+                  </div>
+                </label>
+                <div className="block">
+                  <span className="cp-label block mb-1.5">{t('llm_model')}</span>
+                  <div className="flex gap-2">
+                    <div className="cp-frame flex-1 min-w-0">
+                      <input list="capri-lmstudio-models" value={model} onChange={(e) => setModel(e.target.value)} spellCheck={false} placeholder="llama-3.2-3b-instruct" className={`${field} cp-mono`} />
+                      <datalist id="capri-lmstudio-models">
+                        {models.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <button type="button" onClick={loadModels} disabled={!!busy} className="cp-frame cp-btn-ghost flex items-center gap-1.5 px-3 text-[13px] shrink-0">
+                      {busy === 'models' ? <Loader2 size={13} className="animate-spin" /> : <List size={13} />} {t('llm_loadModels')}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={test} disabled={!!busy} className="cp-frame cp-btn-ghost flex items-center gap-1.5 px-3 py-2 text-[13px] shrink-0">
+                    {busy === 'test' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {busy === 'test' ? t('llm_testing') : t('llm_test')}
+                  </button>
+                  {notice && (
+                    <span className={`flex items-start gap-1.5 text-[14px] leading-snug ${notice.ok ? 'text-[var(--cp-cyan)]' : 'text-[var(--cp-yellow)]'}`}>
+                      {notice.ok ? <Check size={14} className="mt-0.5 shrink-0" /> : <X size={14} className="mt-0.5 shrink-0" />} {notice.text}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {provider === 'cloud' && (
           <div className="space-y-3">

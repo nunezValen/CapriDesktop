@@ -424,5 +424,13 @@ export const zh: Messages = {
   cp2077_kindMod: '模组',
   cp2077_cet: 'CET',
   cp2077_mod: 'Capri 模组',
-  cp2077_events: '正在收到事件'
+  cp2077_events: '正在收到事件',
+
+  // LM Studio and .gguf models
+  llm_engine: '本地引擎',
+  llm_lmStudio: 'LM Studio（.gguf 模型）',
+  llm_lmStudioHint: '打开 LM Studio，加载一个 .gguf 模型并启动本地服务器（Developer 标签）。Capri 在这台电脑上与它通信：没有任何内容离开你的电脑。',
+  pull_importGguf: '将 .gguf 文件导入 Ollama',
+  pull_importing: '正在将 {model} 导入 Ollama…',
+  pull_missingFile: '请选择一个 .gguf 文件。'
 }

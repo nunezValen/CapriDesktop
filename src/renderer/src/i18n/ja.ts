@@ -424,5 +424,13 @@ export const ja: Messages = {
   cp2077_kindMod: 'Mod',
   cp2077_cet: 'CET',
   cp2077_mod: 'Capriのmod',
-  cp2077_events: 'イベント受信中'
+  cp2077_events: 'イベント受信中',
+
+  // LM Studio and .gguf models
+  llm_engine: 'ローカルエンジン',
+  llm_lmStudio: 'LM Studio（.gguf モデル）',
+  llm_lmStudioHint: 'LM Studio を開き、.gguf モデルを読み込んでローカルサーバーを起動してください（Developer タブ）。Capri はこの PC 内で接続し、何も外部に送りません。',
+  pull_importGguf: '.gguf ファイルを Ollama に取り込む',
+  pull_importing: '{model} を Ollama に取り込み中…',
+  pull_missingFile: '.gguf ファイルを選んでください。'
 }

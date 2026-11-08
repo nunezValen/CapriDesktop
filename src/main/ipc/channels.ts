@@ -105,6 +105,7 @@ export const IPC_CHANNELS = {
   CYBERPUNK_FOLDER_PICK: 'cyberpunk:pickFolder',
   CYBERPUNK_FOLDER_REMOVE: 'cyberpunk:removeFolder',
   OLLAMA_PULL_CANCEL: 'ollama:pullCancel',
+  OLLAMA_IMPORT_GGUF: 'ollama:importGguf',
   OLLAMA_PULL_PROGRESS: 'ollama:pullProgress',
   LLM_GET_SETTINGS: 'llm:getSettings',
   LLM_SET_SETTINGS: 'llm:setSettings',

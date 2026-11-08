@@ -292,6 +292,60 @@ export class OllamaService {
   public cancelPull(): void {
     this.pulling?.controller.abort()
   }
+
+  /** A name Ollama accepts, from a .gguf file: "Llama-3.2-3B-Instruct-Q4_K_M.gguf" -> "llama-3.2-3b-instruct-q4_k_m" */
+  public static modelNameForGguf(file: string): string {
+    const base = path.basename(file).replace(/\.gguf$/i, '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[-_.]+$/g, '')
+    return (base || 'gguf-model').slice(0, 80)
+  }
+
+  /**
+   * Adds a .gguf file on this PC to Ollama as its own model, the way `ollama create` does with a
+   * Modelfile that says FROM <file>. Ollama copies the weights into its own models folder.
+   */
+  public async importGguf(file: string, onProgress: (p: ModelPullProgress) => void): Promise<boolean> {
+    const name = OllamaService.modelNameForGguf(file)
+    if (!/\.gguf$/i.test(file) || !fs.existsSync(file)) return onProgress({ model: name, state: 'failed', error: 'missing-file' }), false
+    if (this.pulling) return onProgress({ model: name, state: 'failed', error: 'busy' }), false
+    const cli = this.findOllamaBinary()
+    const status = await this.ensureRunning()
+    if (!cli || !status.running) return onProgress({ model: name, state: 'failed', error: 'offline' }), false
+    const modelfile = path.join(os.tmpdir(), `capri-gguf-${Date.now()}.Modelfile`)
+    fs.writeFileSync(modelfile, `FROM ${file}\n`, 'utf-8')
+    const controller = new AbortController()
+    this.pulling = { model: name, controller }
+    onProgress({ model: name, state: 'downloading', status: 'importing' })
+    try {
+      const ok = await new Promise<boolean>((resolve) => {
+        const child = spawn(cli, ['create', name, '-f', modelfile], { windowsHide: true })
+        let lastLine = ''
+        const onData = (data: Buffer) => {
+          const text = data.toString().replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+          const line = text.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean).pop()
+          if (!line) return
+          lastLine = line
+          const percent = line.match(/(\d{1,3})%/)?.[1]
+          onProgress({ model: name, state: 'downloading', status: line.slice(0, 80), percent: percent ? Number(percent) : undefined })
+        }
+        child.stdout?.on('data', onData)
+        child.stderr?.on('data', onData)
+        controller.signal.addEventListener('abort', () => child.kill())
+        child.on('error', () => resolve(false))
+        child.on('close', (code) => {
+          if (code !== 0 && !controller.signal.aborted) onProgress({ model: name, state: 'failed', error: lastLine.slice(0, 200) || `exit ${code}` })
+          resolve(code === 0)
+        })
+      })
+      if (controller.signal.aborted) return onProgress({ model: name, state: 'cancelled' }), false
+      if (!ok) return false
+      this.cachedModels = []
+      onProgress({ model: `${name}:latest`, state: 'done', percent: 100 })
+      return true
+    } finally {
+      this.pulling = null
+      fs.rm(modelfile, () => {})
+    }
+  }
 }
 
 export const ollamaService = OllamaService.getInstance()
