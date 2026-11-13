@@ -469,6 +469,7 @@ function acpPrompt(turn: Turn): Body[] {
 class AppSession {
   readonly dir: string
   dead = false
+  closedIntentionally = false
   busy = false
   turns = 0
   lastUsed = Date.now()
@@ -727,6 +728,7 @@ function takeSession(app: SessionApp, model: string, command: Command, spare = t
 }
 
 function giveBack(session: AppSession, command: Command): void {
+  if (session.closedIntentionally) return
   session.busy = false
   session.lastUsed = Date.now()
   if (session.dead || session.turns >= SESSION_MAX_TURNS) {
@@ -754,7 +756,10 @@ export function warmAiApp(id: AiAppId, model: string, quick = false): void {
 
 /** Closes every open session: another brain was chosen, or Capri is quitting */
 export function closeAiAppSessions(): void {
-  for (const s of [...sessions]) dropSession(s)
+  for (const s of [...sessions]) {
+    s.closedIntentionally = true
+    dropSession(s)
+  }
 }
 
 async function askCodex(command: Command, turn: Turn, model: string, dir: string, signal?: AbortSignal | null): Promise<string> {
@@ -800,7 +805,7 @@ export async function runAiApp(id: AiAppId, body: Body, model: string, signal?: 
       } catch (err) {
         // Stopped on purpose, or the app answered with an error (signed out, no quota): that's the answer.
         // A session that died on its own gets one more try started the usual way
-        if (signal?.aborted || !session.dead || (err instanceof AiAppError && err.code !== 'other')) throw err
+        if (signal?.aborted || session.closedIntentionally || !session.dead || (err instanceof AiAppError && err.code !== 'other')) throw err
         console.warn(`[AiApps] ${AI_APP_NAMES[id]} session failed, asking once without it:`, (err as Error)?.message)
       } finally {
         giveBack(session, command)

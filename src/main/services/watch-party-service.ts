@@ -831,6 +831,7 @@ If there is no text or title visible, reply "NONE".`
       this.broadcastStatus()
 
       setTimeout(() => {
+        if (this.mode !== 'youtube' || seq !== this.browseSeq) return
         this.hideCursor()
         // Video is now playing! Start full screen watch to react to video content
         void scannerService.startFullscreenWatch()
@@ -873,6 +874,7 @@ If there is no text or title visible, reply "NONE".`
     const isEs = consciousnessService.getPreferredLanguage() === 'es'
 
     if (agree) {
+      const seq = this.browseSeq
       // User accepted the video!
       this.awaitingChoice = false
       this.isBrowsingFeed = false
@@ -888,6 +890,7 @@ If there is no text or title visible, reply "NONE".`
       await desktopController.click(this.currentTarget.x, this.currentTarget.y)
 
       setTimeout(() => {
+        if (this.mode !== 'youtube' || seq !== this.browseSeq) return
         this.hideCursor()
         // Video is now playing! Start full screen watch to react to video content
         void scannerService.startFullscreenWatch()
@@ -984,6 +987,20 @@ If there is no text or title visible, reply "NONE".`
       .replace(/[,:\s]*(?:capri|companion)[!.]*$/i, '')
       .trim()
 
+    // Exit / Stop: "para" only on its own ("pará", "para de mirar"), never inside "para abajo"
+    const isStop =
+      /\b(?:basta|cerra(?:r|lo|la)?|stop|terminar?|termina\s+(?:ya|esto)|sali(?:r|te)?|close|quit|deja\s+de\s+mirar)\b/i.test(clean) ||
+      /^para(?:\s+de\s+\w+.*)?$/i.test(clean)
+    const mentionsOtherParty =
+      (this.mode !== 'youtube' && /\b(?:youtube|yt)\b/i.test(clean)) ||
+      (this.mode !== 'tiktok' && /\b(?:tiktok|tiktoks|tik\s+tok)\b/i.test(clean))
+    if (this.mode !== 'idle' && isStop && !mentionsOtherParty) {
+      this.stopParty(true)
+      return { handled: true }
+    }
+
+    const isMusicRequest = /\b(?:music|musica|song|cancion)\b/i.test(clean) && !/\bvideos?\b/i.test(clean)
+
     // 1. YouTube Autonomous Video Picker (Mode B) - e.g. "hey pick a video from youtube and lets watch it"
     const isEnglishAutoPick =
       /(?:pick|choose|find|select|surprise\s+me)\s+(?:a\s+|with\s+(?:a\s+)?)?(?:video|something)\s*(?:from\s+youtube|on\s+youtube|to\s+watch|for\s+us|and\s+let'?s\s+watch)?/i.test(clean) ||
@@ -993,7 +1010,7 @@ If there is no text or title visible, reply "NONE".`
       /(?:elegi|elige|elegite|busca|buscate|elegir|sorprendeme)\s+(?:vos\s+)?(?:con\s+(?:un\s+)?|un\s+)?(?:video|algo)\s*(?:en\s+youtube|de\s+youtube|para\s+ver|copado)?/i.test(clean) ||
       /(?:elegi\s+vos|elegilo\s+vos|elegi\s+tu|elegilo\s+tu|elegi\s+uno)/i.test(clean)
 
-    if (isEnglishAutoPick || isSpanishAutoPick) {
+    if (!isMusicRequest && (isEnglishAutoPick || isSpanishAutoPick)) {
       // Already in the feed together: she picks from what's on screen instead of opening YouTube again
       if (this.mode === 'youtube' && this.isBrowsingFeed) {
         const isEs = consciousnessService.getPreferredLanguage() === 'es'
@@ -1016,7 +1033,7 @@ If there is no text or title visible, reply "NONE".`
       (/(?:ver|veamos|miremos|mirar|vamos|abrir?|abri|abre|pone|pon|buscar?|busquemos|explorar?|videos?|algo|feed|play|quiero|tengo\s+ganas|que\s+tal\s+si|podemos|juntos)/i.test(clean) ||
         /^(?:de\s+ver\s+youtube|ver\s+youtube|veamos\s+youtube|miremos\s+youtube|vamos\s+a\s+youtube|abrir\s+youtube|abri\s+youtube|abre\s+youtube|youtube)$/i.test(clean))
 
-    if (isEnglishYoutube || isSpanishYoutube) {
+    if (!isMusicRequest && (isEnglishYoutube || isSpanishYoutube)) {
       await this.startYoutubeParty(onSay, isEnglishYoutube)
       return { handled: true }
     }
@@ -1052,11 +1069,7 @@ If there is no text or title visible, reply "NONE".`
         return { handled: true }
       }
 
-      // Exit / Stop: "para" only on its own ("pará", "para de mirar"), never inside "para abajo"
-      if (
-        /\b(?:basta|cerra(?:r|lo|la)?|stop|terminar?|termina\s+(?:ya|esto)|sali(?:r|te)?|close|quit|deja\s+de\s+mirar)\b/i.test(clean) ||
-        /^para(?:\s+de\s+\w+.*)?$/i.test(clean)
-      ) {
+      if (isStop) {
         this.stopParty(true)
         return { handled: true }
       }

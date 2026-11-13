@@ -246,7 +246,7 @@ export class OllamaService {
     const name = model.trim()
     if (!isValidModelName(name)) return onProgress({ model: name, state: 'failed', error: 'invalid-name' }), false
     if (this.pulling) return onProgress({ model: name, state: 'failed', error: 'busy' }), false
-    const status = await this.ensureRunning()
+    const status = await this.ensureRunning(true)
     if (!status.running) return onProgress({ model: name, state: 'failed', error: 'offline' }), false
     const controller = new AbortController()
     this.pulling = { model: name, controller }
@@ -315,7 +315,7 @@ export class OllamaService {
     if (!/\.gguf$/i.test(file) || !fs.existsSync(file)) return onProgress({ model: name, state: 'failed', error: 'missing-file' }), false
     if (this.pulling) return onProgress({ model: name, state: 'failed', error: 'busy' }), false
     const cli = this.findOllamaBinary()
-    const status = await this.ensureRunning()
+    const status = await this.ensureRunning(true)
     if (!cli || !status.running) return onProgress({ model: name, state: 'failed', error: 'offline' }), false
     const modelfile = path.join(os.tmpdir(), `capri-gguf-${Date.now()}.Modelfile`)
     fs.writeFileSync(modelfile, `FROM ${file}\n`, 'utf-8')

@@ -27,8 +27,8 @@ const QUEUES: [ValorantQueue, RegExp][] = [
   ['deathmatch', /death\s*match|todos\s+contra\s+todos|\bffa\b/i],
   ['spikerush', /spike\s*rush|fiebre\s+de\s+(?:la\s+)?spike/i],
   ['swiftplay', /swift\s*play|\bswift\b|partida\s+r[aá]pida|r[aá]pida/i],
-  ['competitive', /competiti\w*|ranked|rankeada|clasificatoria|\brank\b/i],
-  ['unrated', /unrated|sin\s+rango|no\s+competitiv\w*|normal(?:es)?\b|casual/i]
+  ['competitive', /(?<!\bno +)competiti\w*|ranked|rankeada|clasificatoria|\brank\b/i],
+  ['unrated', /unrated|sin\s+rango|no +competitiv\w*|normal(?:es)?\b|casual/i]
 ]
 
 const VALORANT_MENTION = /\b(?:valorant|valo|valorantito|agentes?|agents?)\b/i
