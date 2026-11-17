@@ -2231,7 +2231,9 @@ LANGUAGE RULE: ${langDirective}`
           return
         }
         // A local model that fails says why instead of the offline small talk (issue #37)
-        const detail = String((err as Error)?.message || err).replace(/\s+/g, ' ').slice(0, 160)
+        // She reads it out loud: a server error keeps only its status, the raw body stays in the logs
+        const message = String((err as Error)?.message || err).replace(/\s+/g, ' ')
+        const detail = message.match(/^HTTP \d+/)?.[0] ?? message.slice(0, 160)
         console.warn(`[Capri Agent] Local model ${model} failed:`, err)
         await this.runSmartAutonomous(prompt, projectPath, { kind: 'failed', model, detail })
         return
@@ -2749,8 +2751,8 @@ LANGUAGE RULE: ${langDirective}`
       return
     }
 
-    // Casual chat / conversation & canon lore handler
-    const fastLore = this.resolveFastLoreResponse(p, isSpanish)
+    // Casual chat / conversation & canon lore handler. Not when her brain failed: it would look like an answer
+    const fastLore = brainProblem ? null : this.resolveFastLoreResponse(p, isSpanish)
     if (fastLore) {
       this.emitAssistant(fastLore)
       this.finishSession()

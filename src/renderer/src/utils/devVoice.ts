@@ -24,6 +24,8 @@ export function extractSpokenDevExcerpt(rawText: string): string {
   cleaned = cleaned
     .replace(/https?:\/\/[^\s]+/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Emotion tags like [excited] go whole: stripping only the brackets left the word to be read out
+    .replace(/\[[a-zA-Z0-9_\s\-]+\]/g, ' ')
 
   // Strip markdown syntax symbols, emojis, and noisy characters
   cleaned = cleaned
