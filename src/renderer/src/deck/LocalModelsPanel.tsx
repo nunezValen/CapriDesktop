@@ -6,7 +6,7 @@ import { useT } from '../utils/useUiLang'
 
 const size = (bytes: number): string => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`)
 
-const PART_LABEL = { voiceEnv: 'parts_voiceEnv', whisper: 'parts_whisper', ffmpeg: 'parts_ffmpeg' } as const
+const PART_LABEL = { voiceEnv: 'parts_voiceEnv', whisper: 'parts_whisper', ffmpeg: 'parts_ffmpeg', qwen3tts: 'parts_qwen3tts' } as const
 
 /**
  * Under the thinking models: the models that see (for the scanner and reading the screen), each

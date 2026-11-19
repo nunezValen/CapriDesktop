@@ -115,6 +115,18 @@ export function whisperModels(hubOf: string): string[] {
   }
 }
 
+/** Finds the Qwen3-TTS model folders in the Hugging Face cache */
+export function qwenModels(hubOf: string): string[] {
+  try {
+    return fs
+      .readdirSync(path.join(hubOf, 'hub'), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^models--Qwen--Qwen3-TTS/i.test(e.name))
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+}
+
 /** ollamaBinaryDir: the folder of the Ollama program in use, if she should move it */
 export async function planMove(root: string | null, ollamaProgram: { from: string; to: string } | null): Promise<MovePlan> {
   const home = os.homedir()
@@ -140,6 +152,7 @@ export async function planMove(root: string | null, ollamaProgram: { from: strin
   const hfNow = storageDir('whisper') || defaultHf
   const hfNext = inRoot('whisper', defaultHf)
   for (const name of whisperModels(hfNow)) await add('whisper', path.join(hfNow, 'hub', name), path.join(hfNext, 'hub', name))
+  for (const name of qwenModels(hfNow)) await add('whisper', path.join(hfNow, 'hub', name), path.join(hfNext, 'hub', name))
 
   }
 

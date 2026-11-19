@@ -9,11 +9,11 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { pythonEnvDir, toolsDir } from './app-paths'
-import { dirSize, whisperModels } from './storage-move'
+import { dirSize, qwenModels, whisperModels } from './storage-move'
 import { storageDir } from './storage-location'
 import { voiceService } from './voice-service'
 
-export type InstalledPartId = 'voiceEnv' | 'whisper' | 'ffmpeg'
+export type InstalledPartId = 'voiceEnv' | 'whisper' | 'ffmpeg' | 'qwen3tts'
 
 export interface InstalledPart {
   id: InstalledPartId
@@ -34,12 +34,15 @@ function partPaths(id: InstalledPartId): string[] {
       return whisperModels(whisperHub()).map((name) => path.join(whisperHub(), 'hub', name))
     case 'ffmpeg':
       return [path.join(toolsDir(), 'ffmpeg')]
+    // Qwen weights are stored in the same Hugging Face cache as Whisper
+    case 'qwen3tts':
+      return qwenModels(whisperHub()).map((name) => path.join(whisperHub(), 'hub', name))
   }
 }
 
 export async function listInstalledParts(): Promise<InstalledPart[]> {
   const parts: InstalledPart[] = []
-  for (const id of ['voiceEnv', 'whisper', 'ffmpeg'] as InstalledPartId[]) {
+  for (const id of ['voiceEnv', 'whisper', 'ffmpeg', 'qwen3tts'] as InstalledPartId[]) {
     const paths = partPaths(id).filter((p) => fs.existsSync(p))
     if (!paths.length) continue
     let bytes = 0
@@ -51,7 +54,7 @@ export async function listInstalledParts(): Promise<InstalledPart[]> {
 
 /** Removes one part. The voice process is stopped first: Windows won't delete files it has open */
 export async function removeInstalledPart(id: InstalledPartId): Promise<InstalledPart[]> {
-  if (id === 'voiceEnv' || id === 'whisper') voiceService.stopServer()
+  if (id === 'voiceEnv' || id === 'whisper' || id === 'qwen3tts') voiceService.stopServer()
   await new Promise((r) => setTimeout(r, 800))
   for (const p of partPaths(id)) {
     try {

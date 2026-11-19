@@ -9,6 +9,8 @@ import type { InstalledPart, LocalModelInfo } from '../main/services/installed-p
 import type { AiAppInfo } from '../main/services/ai-apps'
 import type { CyberpunkFolderInfo, CyberpunkFoldersState } from '../main/services/game/adapters/cyberpunk/cyberpunk-folders'
 import type { BenchmarkRequest, BenchmarkResult } from '../shared/benchmark'
+import type { QwenTtsConfig } from '../shared/qwen-tts'
+import type { GpuBudget, QwenTtsSize, TtsProviderId } from '../shared/gpu-budget'
 import type { BugReportResult, LogLine } from '../shared/logs'
 import type { HotkeyAction, HotkeyProblem, Hotkeys } from '../shared/hotkeys'
 import {
@@ -213,7 +215,8 @@ export interface IElectronAPI {
   }
   setup: {
     getStatus: () => Promise<SetupStatus>
-    run: (step: 'python' | 'ffmpeg' | 'ollama' | 'model' | 'persona' | 'whisper' | 'vision') => Promise<{ ok: boolean; status: SetupStatus }>
+    run: (step: 'python' | 'ffmpeg' | 'ollama' | 'model' | 'persona' | 'whisper' | 'vision' | 'qwen3tts', options?: { qwen?: Partial<QwenTtsConfig> }) => Promise<{ ok: boolean; status: SetupStatus }>
+    qwenStatus: (qwen?: Partial<QwenTtsConfig>) => Promise<{ ready: boolean; reason: string }>
     onLog: (callback: (entry: { step: string; line: string }) => void) => () => void
     finish: () => Promise<boolean>
     open: () => Promise<boolean>
@@ -247,6 +250,10 @@ export interface IElectronAPI {
     resetHotkeys: () => Promise<Hotkeys>
     onHotkeysChanged: (callback: (hotkeys: Hotkeys) => void) => () => void
     synthesize: (text: string, langOverride?: string) => Promise<{ success: boolean; audioDataUrl?: string; error?: string }>
+    previewQwen: (text: string, qwen: Partial<QwenTtsConfig>) => Promise<{ success: boolean; audioDataUrl?: string; error?: string }>
+    pickReference: () => Promise<{ path: string; name: string } | null>
+    transcribeReference: (file: string) => Promise<{ success: boolean; text?: string; error?: string }>
+    designReference: (text: string, description: string, lang?: string) => Promise<{ success: boolean; path?: string; error?: string }>
     getConfig: () => Promise<any>
     setConfig: (config: any) => Promise<{ success: boolean; config?: any; error?: string }>
     onToggleRecording: (callback: () => void) => () => void
@@ -257,6 +264,9 @@ export interface IElectronAPI {
   }
   benchmark: {
     run: (req: BenchmarkRequest) => Promise<BenchmarkResult>
+  }
+  gpu: {
+    budget: (preview?: { provider?: TtsProviderId; qwenSize?: QwenTtsSize }) => Promise<GpuBudget>
   }
   logs: {
     get: () => Promise<LogLine[]>

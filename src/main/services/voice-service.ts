@@ -11,6 +11,7 @@ import { app } from 'electron'
 import { isMac } from './platform'
 import { transcribeInCloud } from './cloud-stt'
 import { consciousnessService } from './consciousness-service'
+import { effectiveQwenSize, normalizeQwenConfig, type QwenTtsConfig } from '../../shared/qwen-tts'
 import { ollamaService } from './ollama-service'
 function loadEnv(): void {
   const envCandidates = [envFilePath()]
@@ -53,6 +54,15 @@ export interface SynthesizeResult {
   fallback?: boolean
 }
 
+type TtsResult = { success: boolean; error?: string; fallback?: boolean; path?: string }
+interface TtsJob {
+  id: string
+  key: string
+  payload: { op?: string; text: string; lang?: string; out: string; fresh?: boolean; cfg?: Record<string, unknown>; description?: string }
+  resolve: (res: TtsResult) => void
+  timer?: NodeJS.Timeout
+}
+
 export class VoiceService {
   private static instance: VoiceService
   private sttWorker: ChildProcess | null = null
@@ -69,6 +79,16 @@ export class VoiceService {
   private workerLineBuffer = ''
   private audioCache: Map<string, string> = new Map()
   private prewarming = false
+  private ttsWorker: ChildProcess | null = null
+  /** The worker answers one line at a time: one request is with it, the rest wait here */
+  private ttsActive: TtsJob | null = null
+  private ttsQueue: TtsJob[] = []
+  private ttsCounter = 0
+  private ttsLoadedKey = ''
+  /** Where the model runs (cuda:0, mps, cpu), as the worker last said */
+  private ttsDevice = ''
+  private ttsIdleTimer: NodeJS.Timeout | null = null
+  private ttsLineBuffer = ''
 
   public static getInstance(): VoiceService {
     if (!VoiceService.instance) {
@@ -78,6 +98,7 @@ export class VoiceService {
   }
 
   public stopServer(): void {
+    this.stopTtsWorker()
     if (this.sttWorker) {
       try {
         this.sttWorker.kill()
@@ -96,6 +117,183 @@ export class VoiceService {
     const whisper = storageDir('whisper')
     if (whisper) env.HF_HOME = whisper
     return env
+  }
+
+  public isQwenActive(): boolean {
+    const provider = String(this.getConfig()?.provider || '').toLowerCase().replace(/_/g, '-')
+    return provider === 'qwen3-tts' || provider === 'qwen3tts'
+  }
+
+  public stopTtsWorker(): void {
+    if (this.ttsIdleTimer) clearTimeout(this.ttsIdleTimer)
+    this.ttsIdleTimer = null
+    const worker = this.ttsWorker
+    this.ttsWorker = null
+    this.ttsLoadedKey = ''
+    this.ttsDevice = ''
+    if (worker) {
+      try {
+        worker.kill()
+      } catch {}
+    }
+    this.drainTtsQueue('Qwen3-TTS worker stopped')
+  }
+
+  /** Fails the request in the worker and every one waiting for it */
+  private drainTtsQueue(error: string): void {
+    const jobs = [...(this.ttsActive ? [this.ttsActive] : []), ...this.ttsQueue]
+    this.ttsActive = null
+    this.ttsQueue = []
+    for (const job of jobs) {
+      if (job.timer) clearTimeout(job.timer)
+      job.resolve({ success: false, error })
+    }
+  }
+
+  private ensureTtsWorker(): boolean {
+    if (this.ttsWorker && !this.ttsWorker.killed) return true
+    try {
+      const worker = spawn(this.findPythonPath(), [this.findScriptPath(), 'tts-worker'], {
+        windowsHide: true,
+        env: this.pythonEnv(),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      this.ttsWorker = worker
+      this.ttsLineBuffer = ''
+      worker.stdin?.on('error', (err) => {
+        if (this.ttsWorker === worker) this.drainTtsQueue(err.message)
+      })
+      worker.stdout?.on('data', (chunk) => {
+        this.ttsLineBuffer += chunk.toString()
+        const lines = this.ttsLineBuffer.split('\n')
+        this.ttsLineBuffer = lines.pop() || ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const parsed = JSON.parse(trimmed)
+            if (parsed.ready !== undefined) continue
+            if (typeof parsed.device === 'string') this.ttsDevice = parsed.device
+            const job = this.ttsActive
+            if (job && parsed.id === job.id) {
+              this.ttsActive = null
+              if (job.timer) clearTimeout(job.timer)
+              if (parsed.success) this.ttsLoadedKey = job.key
+              job.resolve(parsed)
+              this.pumpTtsQueue()
+            }
+          } catch {
+            console.warn('[VoiceService TTS Worker] Unparseable line:', trimmed)
+          }
+        }
+      })
+      worker.stderr?.on('data', (d) => {
+        const str = d.toString().trim()
+        if (str && !/%\||it\/s|s\/it/.test(str)) console.warn('[VoiceService TTS Worker]', str)
+      })
+      worker.on('error', (err) => {
+        console.error('[VoiceService TTS Worker Error]', err)
+        if (this.ttsWorker === worker) this.drainTtsQueue(err.message)
+      })
+      worker.on('close', (code) => {
+        console.warn(`[VoiceService TTS Worker] Process closed with code ${code}`)
+        if (this.ttsWorker !== worker) return
+        this.ttsWorker = null
+        this.ttsLoadedKey = ''
+        this.ttsDevice = ''
+        this.drainTtsQueue(`TTS worker closed with code ${code}`)
+      })
+      return true
+    } catch (err) {
+      console.error('[VoiceService TTS Worker Spawn Failed]', err)
+      this.ttsWorker = null
+      return false
+    }
+  }
+
+  private qwenKey(cfg: QwenTtsConfig): string {
+    return `${cfg.mode}|${effectiveQwenSize(cfg)}`
+  }
+
+  private requestTts(payload: TtsJob['payload'], key: string): Promise<TtsResult> {
+    return new Promise((resolve) => {
+      this.ttsQueue.push({ id: `tts_${++this.ttsCounter}_${Date.now()}`, key, payload, resolve })
+      this.pumpTtsQueue()
+    })
+  }
+
+  /** Sends the next waiting request once the worker is free. Its time limit starts here, not when it was asked for */
+  private pumpTtsQueue(): void {
+    if (this.ttsActive) return
+    const job = this.ttsQueue.shift()
+    if (!job) return
+    if (!this.ensureTtsWorker() || !this.ttsWorker?.stdin) {
+      job.resolve({ success: false, error: 'Qwen3-TTS worker could not start' })
+      return this.pumpTtsQueue()
+    }
+    // A model that has to load, or one running on the CPU, takes far longer than a loaded one on CUDA
+    const waitMs = this.ttsLoadedKey === job.key && this.ttsDevice.startsWith('cuda') ? 60_000 : this.ttsLoadedKey === job.key ? 240_000 : 300_000
+    this.ttsActive = job
+    job.timer = setTimeout(() => {
+      if (this.ttsActive !== job) return
+      this.ttsActive = null
+      // The worker is stuck: restart it, but the lines still waiting get a fresh worker instead of failing
+      const stuck = this.ttsWorker
+      this.ttsWorker = null
+      this.ttsLoadedKey = ''
+      this.ttsDevice = ''
+      try {
+        stuck?.kill()
+      } catch {}
+      job.resolve({ success: false, error: `Qwen3-TTS timeout (${waitMs}ms)` })
+      this.pumpTtsQueue()
+    }, waitMs)
+    const { payload } = job
+    this.ttsWorker.stdin.write(JSON.stringify({ id: job.id, op: payload.op, text: payload.text, out: payload.out, lang: payload.lang, noCache: payload.fresh, cfg: payload.cfg, description: payload.description }) + '\n')
+  }
+
+  /** Stops the model after a while when a preview used a voice that is not saved */
+  private stopTtsWhenIdle(): void {
+    if (this.ttsIdleTimer) clearTimeout(this.ttsIdleTimer)
+    this.ttsIdleTimer = setTimeout(() => {
+      // Something is still being spoken: look again later instead of cutting it off
+      if (this.ttsActive || this.ttsQueue.length) return this.stopTtsWhenIdle()
+      if (!this.isQwenActive()) return this.stopTtsWorker()
+      // Qwen is the saved voice, but a preview may have left another mode or size loaded
+      if (this.ttsLoadedKey !== this.qwenKey(normalizeQwenConfig(this.getConfig()?.qwen3_tts))) {
+        this.stopTtsWorker()
+        this.warmQwen()
+      }
+    }, 120_000)
+  }
+
+  public warmQwen(): void {
+    if (!this.isQwenActive()) return
+    const key = this.qwenKey(normalizeQwenConfig(this.getConfig()?.qwen3_tts))
+    if (this.ttsLoadedKey === key) return
+    const out = path.join(os.tmpdir(), `capri_tts_warm_${Date.now()}.mp3`)
+    void this.requestTts({ text: 'Ready.', lang: 'en', out, fresh: true, cfg: { _strict: true } }, key).then(() => {
+      try {
+        if (fs.existsSync(out)) fs.unlinkSync(out)
+      } catch {}
+    })
+  }
+
+  /** Makes a sample with a designed voice and saves it as wav so it can be cloned */
+  public async designReference(text: string, description: string, lang?: string): Promise<{ success: boolean; path?: string; error?: string }> {
+    const dir = path.join(voiceDataDir(), 'clone')
+    fs.mkdirSync(dir, { recursive: true })
+    const out = path.join(dir, `design_${Date.now()}.wav`)
+    const res = await this.requestTts({ op: 'design_reference', text, description, lang, out }, 'design|1.7B')
+    this.stopTtsWhenIdle()
+    return res.success ? { success: true, path: out } : { success: false, error: res.error }
+  }
+
+  /** Transcribes the reference locally so the voice sample never goes to the cloud */
+  public async transcribeReference(filePath: string): Promise<TranscribeResult> {
+    const stat = fs.statSync(filePath)
+    if (stat.size > 50 * 1024 * 1024) return { success: false, error: 'Reference audio is too large' }
+    return this.transcribeLocally(fs.readFileSync(filePath), false, 'small')
   }
 
   private findScriptPath(): string {
@@ -366,7 +564,7 @@ export class VoiceService {
   /**
    * Synthesizes text into Capri's voice with exact acoustic profile and zero latency
    */
-  public async synthesize(text: string, langOverride?: string, opts: { silent?: boolean; fresh?: boolean } = {}): Promise<SynthesizeResult> {
+  public async synthesize(text: string, langOverride?: string, opts: { silent?: boolean; fresh?: boolean; qwenPreview?: Partial<QwenTtsConfig> } = {}): Promise<SynthesizeResult> {
     // Strip all emoji characters and pictorial symbols so TTS does not read them out loud
     const cleanText = stripLookTags(text)
       .replace(/[\u{1F300}-\u{1F9FF}]|[\u{1FA00}-\u{1FAFF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F000}-\u{1F02F}]|[\u{1F0A0}-\u{1F0FF}]|[\u{1F100}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu, '')
@@ -479,79 +677,98 @@ export class VoiceService {
 
     const ttsStartedAt = Date.now()
     try {
+      const viaWorker = this.isQwenActive() || !!opts.qwenPreview
       return await new Promise<SynthesizeResult>((resolve) => {
-        const proc = spawn(pythonPath, ttsArgs, {
-          windowsHide: true,
-          env: this.pythonEnv()
-        })
-
-        proc.once('error', err => resolve({success: false, error: `Voice engine could not start: ${err.message}. Run setup to install Python and voice dependencies.`}))
-
-        let stdout = ''
-        let stderr = ''
-
-        proc.stdout.on('data', (d) => (stdout += d.toString()))
-        proc.stderr.on('data', (d) => {
-          const str = d.toString()
-          stderr += str
-          if (str.trim() && !opts.silent) {
-            console.log(str.trim())
-          }
-        })
-
-        proc.on('close', async (code) => {
+        const finish = async (code: number | null, stdout: string, stderr: string): Promise<void> => {
           if (code !== 0 || !fs.existsSync(tempOut)) {
-            console.warn('[VoiceService] Python TTS process failed:', stderr || stdout)
-            resolve({ success: false, error: stderr || `TTS process exited with code ${code}` })
-            return
-          }
-
-          if (!opts.silent) console.log(`[VoiceService] Voice synthesized in ${Date.now() - ttsStartedAt}ms`)
-          try {
-            const audioBuffer = fs.readFileSync(tempOut)
-            const base64Audio = audioBuffer.toString('base64')
-            const audioDataUrl = `data:audio/mp3;base64,${base64Audio}`
-
-            // Clean up temporary file
+              console.warn('[VoiceService] Python TTS process failed:', stderr || stdout)
+              resolve({ success: false, error: stderr || `TTS process exited with code ${code}` })
+              return
+            }
+  
+            if (!opts.silent) console.log(`[VoiceService] Voice synthesized in ${Date.now() - ttsStartedAt}ms`)
             try {
-              fs.unlinkSync(tempOut)
-            } catch {}
-
-            // Broadcast audio‑play event to all renderer windows so UI can show the speech bubble instantly
-            if (!opts.silent) {
+              const audioBuffer = fs.readFileSync(tempOut)
+              const base64Audio = audioBuffer.toString('base64')
+              const audioDataUrl = `data:audio/mp3;base64,${base64Audio}`
+  
+              // Clean up temporary file
               try {
-                const { BrowserWindow } = require('electron')
-                BrowserWindow.getAllWindows().forEach((win: any) => {
-                  win.webContents.send('audio-play', { path: tempOut })
-                })
-              } catch (e) {
-                console.warn('[VoiceService] Failed to broadcast audio‑play event:', e)
+                fs.unlinkSync(tempOut)
+              } catch {}
+  
+              // Broadcast audio‑play event to all renderer windows so UI can show the speech bubble instantly
+              if (!opts.silent) {
+                try {
+                  const { BrowserWindow } = require('electron')
+                  BrowserWindow.getAllWindows().forEach((win: any) => {
+                    win.webContents.send('audio-play', { path: tempOut })
+                  })
+                } catch (e) {
+                  console.warn('[VoiceService] Failed to broadcast audio‑play event:', e)
+                }
               }
-            }
-
-            // If the selected provider (Fish Audio / ElevenLabs) failed and Python fell back to
-            // Edge-TTS, play it this once but never cache it, so the next try uses the real voice.
-            let isFallback = false
-            try {
-              const lastLine = stdout.trim().split(/\r?\n/).pop() || '{}'
-              isFallback = JSON.parse(lastLine).fallback === true
-            } catch {}
-
-            if (isFallback) {
-              console.warn(`[VoiceService] Provider failed, Edge-TTS fallback used (not cached): "${cleanText}"`)
-            } else if (!opts.fresh) {
-              // Store in fast memory cache (limit to 400 phrases)
-              if (this.audioCache.size >= 400) {
-                const firstKey = this.audioCache.keys().next().value
-                if (firstKey) this.audioCache.delete(firstKey)
+  
+              // If the selected provider (Fish Audio / ElevenLabs) failed and Python fell back to
+              // Edge-TTS, play it this once but never cache it, so the next try uses the real voice.
+              let isFallback = false
+              try {
+                const lastLine = stdout.trim().split(/\r?\n/).pop() || '{}'
+                isFallback = JSON.parse(lastLine).fallback === true
+              } catch {}
+  
+              if (isFallback) {
+                console.warn(`[VoiceService] Provider failed, Edge-TTS fallback used (not cached): "${cleanText}"`)
+              } else if (!opts.fresh) {
+                // Store in fast memory cache (limit to 400 phrases)
+                if (this.audioCache.size >= 400) {
+                  const firstKey = this.audioCache.keys().next().value
+                  if (firstKey) this.audioCache.delete(firstKey)
+                }
+                this.audioCache.set(cacheKey, audioDataUrl)
               }
-              this.audioCache.set(cacheKey, audioDataUrl)
+  
+              resolve({ success: true, audioDataUrl, ...(isFallback ? { fallback: true } : {}) })
+            } catch (readErr: any) {
+              resolve({ success: false, error: readErr?.message || 'Failed to read synthesized audio' })
             }
-
-            resolve({ success: true, audioDataUrl, ...(isFallback ? { fallback: true } : {}) })
-          } catch (readErr: any) {
-            resolve({ success: false, error: readErr?.message || 'Failed to read synthesized audio' })
           }
+
+        const runOneShot = (): void => {
+          const proc = spawn(pythonPath, ttsArgs, {
+            windowsHide: true,
+            env: this.pythonEnv()
+          })
+
+          proc.once('error', err => resolve({success: false, error: `Voice engine could not start: ${err.message}. Run setup to install Python and voice dependencies.`}))
+
+          let stdout = ''
+          let stderr = ''
+
+          proc.stdout.on('data', (d) => (stdout += d.toString()))
+          proc.stderr.on('data', (d) => {
+            const str = d.toString()
+            stderr += str
+            if (str.trim() && !opts.silent) {
+              console.log(str.trim())
+            }
+          })
+
+          proc.on('close', (code) => void finish(code, stdout, stderr))
+        }
+
+        if (!viaWorker) return runOneShot()
+        const preview = opts.qwenPreview ? normalizeQwenConfig(opts.qwenPreview) : null
+        const qwenCfg = preview ?? normalizeQwenConfig(this.getConfig()?.qwen3_tts)
+        const cfg = preview ? { provider: 'qwen3-tts', _strict: true, qwen3_tts: preview } : undefined
+        void this.requestTts({ text: spokenText, lang: targetLang, out: tempOut, fresh: !!opts.fresh, cfg }, this.qwenKey(qwenCfg)).then((res) => {
+          if (preview) this.stopTtsWhenIdle()
+          if (res.success) return void finish(0, JSON.stringify(res), '')
+          if (preview) return resolve({ success: false, error: res.error || 'Qwen3-TTS failed' })
+          // Quitting stops the worker on purpose: no new process for the fallback voice
+          if ((app as unknown as { isQuitting?: boolean }).isQuitting) return resolve({ success: false, error: 'Capri is closing' })
+          console.warn('[VoiceService] Qwen3-TTS did not answer, using the fallback voice:', res.error)
+          runOneShot()
         })
       })
     } catch (err: any) {
@@ -722,7 +939,7 @@ export class VoiceService {
           for (const k of ['provider', 'synth_preset', 'pitch']) {
             if (local[k] !== undefined) base[k] = local[k]
           }
-          for (const k of ['fish_audio', 'elevenlabs']) {
+          for (const k of ['fish_audio', 'elevenlabs', 'qwen3_tts']) {
             if (local[k] && typeof local[k] === 'object') base[k] = { ...(base[k] || {}), ...local[k] }
           }
         }
@@ -754,13 +971,13 @@ export class VoiceService {
         for (const k of ['provider', 'synth_preset', 'pitch']) {
           if (config[k] !== undefined) nextLocal[k] = config[k]
         }
-        for (const k of ['fish_audio', 'elevenlabs']) {
+        for (const k of ['fish_audio', 'elevenlabs', 'qwen3_tts']) {
           if (config[k] && typeof config[k] === 'object') nextLocal[k] = { ...(local[k] || {}), ...config[k] }
         }
         fs.writeFileSync(this.getLocalConfigPath(), JSON.stringify(nextLocal, null, 2), 'utf-8')
 
         const publicCfg = JSON.parse(JSON.stringify(config))
-        for (const k of ['fish_audio', 'elevenlabs']) {
+        for (const k of ['fish_audio', 'elevenlabs', 'qwen3_tts']) {
           if (publicCfg[k] && local[k]?.api_key) publicCfg[k].api_key = ''
         }
         fs.writeFileSync(p, JSON.stringify(publicCfg, null, 2), 'utf-8')
@@ -768,6 +985,9 @@ export class VoiceService {
         fs.writeFileSync(p, JSON.stringify(config, null, 2), 'utf-8')
       }
       this.audioCache.clear()
+      // Free the GPU when Qwen is not used and load the model when it is
+      if (this.isQwenActive()) this.warmQwen()
+      else this.stopTtsWorker()
       return { success: true }
     } catch (err: any) {
       console.error('[VoiceService] Failed to save voice config:', err)

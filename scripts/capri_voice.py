@@ -135,13 +135,19 @@ def apply_audio_filter(raw_path: str, out_path: str, synth_preset: str = "cyber_
 
     pitch_filter = ""
     if abs(pitch_mult - 1.0) >= 0.01:
-        pitch_filter = f"asetrate=44100*{pitch_mult:.3f},aresample=44100,atempo={1.0/pitch_mult:.3f},"
+        # Resample to 44.1 kHz first: asetrate assumes 44.1 kHz input, but local engines
+        # (Qwen3-TTS writes 24 kHz) would otherwise play too fast and too high.
+        pitch_filter = f"aresample=44100,asetrate=44100*{pitch_mult:.3f},aresample=44100,atempo={1.0/pitch_mult:.3f},"
 
     if preset == "none" or (preset not in SYNTH_FILTERS and preset != "ringmod"):
         if pitch_filter:
             cmd = [FFMPEG, "-y", "-threads", "4", "-i", raw_path, "-af", pitch_filter.rstrip(","), "-b:a", "192k", out_path]
             proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return proc.returncode == 0
+        if raw_path.lower().endswith(".wav"):
+            # Turns the wav from local engines into mp3
+            cmd = [FFMPEG, "-y", "-i", raw_path, "-b:a", "192k", out_path]
+            return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
         if os.path.abspath(raw_path) != os.path.abspath(out_path):
             shutil.copyfile(raw_path, out_path)
         return True
@@ -513,7 +519,197 @@ def synthesize_fish_audio(text: str, out_path: str, fish_cfg: dict, synth_preset
                 pass
         return False
 
-async def synthesize_speech(text: str, out_path: str, lang_override: str = None, use_cache: bool = True):
+QWEN_PROVIDERS = ("qwen3-tts", "qwen3_tts", "qwen3tts")
+QWEN_TTS_REPOS = {
+    ("custom", "0.6B"): "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    ("custom", "1.7B"): "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    ("clone", "0.6B"): "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    ("clone", "1.7B"): "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    ("design", "1.7B"): "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+}
+QWEN_TTS_SPEAKERS = ["Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna", "Sohee"]
+QWEN_TTS_LANGS = {
+    "zh": "Chinese", "en": "English", "ja": "Japanese", "ko": "Korean", "de": "German",
+    "fr": "French", "ru": "Russian", "pt": "Portuguese", "es": "Spanish", "it": "Italian",
+}
+QWEN_MAX_NEW_TOKENS = 2048
+QWEN_REFERENCE_SECONDS = 30
+_qwen_state = {"key": None, "model": None, "device": None, "prompt_key": None, "prompt": None}
+_qwen_last_error = ""
+
+
+def qwen_language(lang: str):
+    if not lang:
+        return "Auto"
+    return QWEN_TTS_LANGS.get(lang.lower().split("-")[0])
+
+
+def qwen_spec(q_cfg: dict):
+    mode = q_cfg.get("mode") if q_cfg.get("mode") in ("custom", "clone", "design") else "custom"
+    size = "1.7B" if mode == "design" or str(q_cfg.get("model_size", "0.6B")) == "1.7B" else "0.6B"
+    return mode, size
+
+
+def qwen_cache_id(q_cfg: dict, lang: str) -> str:
+    mode, size = qwen_spec(q_cfg)
+    ref = str(q_cfg.get("clone_ref_audio", "") or "")
+    stamp = ""
+    if mode == "clone" and ref and os.path.isfile(ref):
+        stamp = f"{os.path.getmtime(ref)}:{os.path.getsize(ref)}"
+    parts = [mode, size, q_cfg.get("speaker", ""), q_cfg.get("instruct", "")]
+    if mode == "clone":
+        parts += [ref, stamp, q_cfg.get("clone_ref_text", ""), bool(q_cfg.get("clone_xvector_only"))]
+    if mode == "design":
+        parts += [q_cfg.get("design_description", "")]
+    return "|".join(str(p) for p in parts) + f"|{lang or ''}"
+
+
+def load_qwen_tts(mode: str, size: str):
+    key = (mode, size)
+    if _qwen_state["model"] is not None and _qwen_state["key"] == key:
+        return _qwen_state["model"], _qwen_state["device"]
+    import torch
+    from qwen_tts import Qwen3TTSModel
+
+    if _qwen_state["model"] is not None:
+        _qwen_state.update({"model": None, "key": None, "prompt": None, "prompt_key": None})
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    if torch.cuda.is_available():
+        device = "cuda:0"
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        device, dtype = "mps", torch.float16
+    else:
+        device, dtype = "cpu", torch.float32
+
+    kwargs = {"device_map": device, "dtype": dtype}
+    try:
+        import flash_attn  # noqa: F401
+        kwargs["attn_implementation"] = "flash_attention_2"
+    except Exception:
+        kwargs["attn_implementation"] = "sdpa"
+    repo = QWEN_TTS_REPOS[key]
+    sys.stderr.write(f"[Qwen3-TTS] Loading {repo} on {device} ({kwargs['attn_implementation']})\n")
+    model = Qwen3TTSModel.from_pretrained(repo, **kwargs)
+    _qwen_state.update({"key": key, "model": model, "device": device})
+    return model, device
+
+
+def prepare_reference(path: str) -> str:
+    """Converts the reference to a short mono wav so any audio file works."""
+    import hashlib
+    st = os.stat(path)
+    digest = hashlib.sha256(f"{path}|{st.st_mtime}|{st.st_size}".encode()).hexdigest()[:16]
+    out_dir = os.path.join(VOICE_DIR, "clone")
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"prep_{digest}.wav")
+    if os.path.exists(out) and os.path.getsize(out) > 1000:
+        return out
+    cmd = [FFMPEG, "-y", "-i", path, "-t", str(QWEN_REFERENCE_SECONDS), "-ac", "1", "-ar", "24000", out]
+    try:
+        ok = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    except OSError:
+        ok = False
+    return out if ok and os.path.exists(out) else path
+
+
+def with_token_limit(fn, **kwargs):
+    try:
+        return fn(max_new_tokens=QWEN_MAX_NEW_TOKENS, **kwargs)
+    except TypeError:
+        return fn(**kwargs)
+
+
+def qwen_generate(model, mode: str, size: str, text: str, language: str, q_cfg: dict):
+    if mode == "clone":
+        ref = str(q_cfg.get("clone_ref_audio", "") or "")
+        if not ref or not os.path.isfile(ref):
+            raise RuntimeError("No reference audio selected for voice cloning")
+        ref_text = str(q_cfg.get("clone_ref_text", "") or "").strip()
+        xvec = bool(q_cfg.get("clone_xvector_only")) or not ref_text
+        prepared = prepare_reference(ref)
+        prompt_key = (size, prepared, ref_text, xvec)
+        if _qwen_state["prompt_key"] != prompt_key:
+            _qwen_state["prompt"] = model.create_voice_clone_prompt(ref_audio=prepared, ref_text=None if xvec else ref_text, x_vector_only_mode=xvec)
+            _qwen_state["prompt_key"] = prompt_key
+        return with_token_limit(model.generate_voice_clone, text=[text], language=[language], voice_clone_prompt=_qwen_state["prompt"])
+    if mode == "design":
+        description = str(q_cfg.get("design_description", "") or "").strip()
+        if not description:
+            raise RuntimeError("Describe the voice first")
+        return with_token_limit(model.generate_voice_design, text=text, language=language, instruct=description)
+    speaker = q_cfg.get("speaker") if q_cfg.get("speaker") in QWEN_TTS_SPEAKERS else "Vivian"
+    kwargs = {"text": text, "language": language, "speaker": speaker}
+    instruct = str(q_cfg.get("instruct", "") or "").strip() if size == "1.7B" else ""
+    if instruct:
+        kwargs["instruct"] = instruct
+    return with_token_limit(model.generate_custom_voice, **kwargs)
+
+
+def synthesize_qwen3(text: str, out_path: str, q_cfg: dict, lang: str, synth_preset: str, pitch_str: str) -> bool:
+    global _qwen_last_error
+    _qwen_last_error = ""
+    if os.environ.get("CAPRI_TTS_WORKER") != "1":
+        _qwen_last_error = "Qwen3-TTS only runs inside the voice worker"
+        return False
+    language = qwen_language(lang)
+    if language is None:
+        _qwen_last_error = f"Qwen3-TTS does not speak '{lang}'"
+        sys.stderr.write(f"[Qwen3-TTS] {_qwen_last_error}, using Edge-TTS for this line\n")
+        return False
+    mode, size = qwen_spec(q_cfg)
+    raw = out_path + ".raw.wav"
+    try:
+        import soundfile as sf
+        model, _device = load_qwen_tts(mode, size)
+        wavs, sr = qwen_generate(model, mode, size, text, language, q_cfg)
+        sf.write(raw, wavs[0], sr)
+        apply_audio_filter(raw, out_path, synth_preset, pitch_mult=parse_pitch_multiplier(pitch_str))
+        return os.path.exists(out_path) and os.path.getsize(out_path) > 500
+    except Exception as e:
+        _qwen_last_error = str(e)
+        sys.stderr.write(f"[Qwen3-TTS] Failed: {e}\n")
+        return False
+    finally:
+        if os.path.exists(raw):
+            try:
+                os.remove(raw)
+            except Exception:
+                pass
+
+
+def design_reference(text: str, description: str, lang: str, out_path: str) -> dict:
+    """Makes a sample with a designed voice and saves it as wav for cloning."""
+    language = qwen_language(lang)
+    if language is None:
+        return {"success": False, "error": f"Qwen3-TTS does not speak '{lang}'"}
+    try:
+        import soundfile as sf
+        model, _device = load_qwen_tts("design", "1.7B")
+        wavs, sr = qwen_generate(model, "design", "1.7B", text, language, {"design_description": description})
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        sf.write(out_path, wavs[0], sr)
+        return {"success": True, "path": out_path}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def plain_speech_text(cleaned: str, voice: str) -> str:
+    """Removes emotion tags and writes laughs out as words for engines that cannot act them."""
+    laugh_word = "jajaja" if str(voice).lower().startswith("es-") else "hahaha"
+    giggle_word = "jiji" if str(voice).lower().startswith("es-") else "hehe"
+    text = re.sub(r'\[(?:laughs?\s+hard|laugh(?:s|ing)?|chuckl(?:e|es|ing))\]', f' {laugh_word}, ', cleaned, flags=re.IGNORECASE)
+    text = re.sub(r'\[(?:giggl(?:e|es|ing))\]', f' {giggle_word}, ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[[a-zA-Z0-9_,\s\-]+\]', '', text)
+    text = re.sub(r'\s+,', ',', re.sub(r'\s+', ' ', text)).strip(' ,')
+    return re.sub(r'[{}\[\]"\'`]+', '', text).strip(' ,')
+
+
+async def synthesize_speech(text: str, out_path: str, lang_override: str = None, use_cache: bool = True, cfg_override: dict = None):
     cleaned = clean_text_for_speech(text)
     if not cleaned:
         cleaned = "Standing by, choomba!"
@@ -546,9 +742,17 @@ async def synthesize_speech(text: str, out_path: str, lang_override: str = None,
                             cfg.setdefault("fish_audio", {}).update(local_cfg["fish_audio"])
                         if "elevenlabs" in local_cfg and isinstance(local_cfg["elevenlabs"], dict):
                             cfg.setdefault("elevenlabs", {}).update(local_cfg["elevenlabs"])
+                        if "qwen3_tts" in local_cfg and isinstance(local_cfg["qwen3_tts"], dict):
+                            cfg.setdefault("qwen3_tts", {}).update(local_cfg["qwen3_tts"])
                 break
             except Exception:
                 pass
+
+    for key, value in (cfg_override or {}).items():
+        if isinstance(value, dict):
+            cfg.setdefault(key, {}).update(value)
+        else:
+            cfg[key] = value
 
     load_env_file()
 
@@ -571,6 +775,8 @@ async def synthesize_speech(text: str, out_path: str, lang_override: str = None,
             if provider in ("fish-audio", "fish_audio", "fishaudio"):
                 fcfg = cfg.get("fish_audio", {}) or {}
                 fish_id = f"{fcfg.get('reference_id', '')}|{fcfg.get('model', '')}"
+            if provider in QWEN_PROVIDERS:
+                fish_id = qwen_cache_id(cfg.get("qwen3_tts", {}) or {}, lang_override or "")
             raw_key = f"{provider}|{cleaned.lower()}|{voice}|{pitch}|{rate}|{synth_preset}|{fish_id}"
             cache_hash = hashlib.md5(raw_key.encode("utf-8")).hexdigest()
             cached_file = os.path.join(cache_dir, f"{cache_hash}.mp3")
@@ -602,6 +808,22 @@ async def synthesize_speech(text: str, out_path: str, lang_override: str = None,
             print(json.dumps({"success": True, "path": out_path, "provider": "elevenlabs"}))
             return
         sys.stderr.write("[TTS] ElevenLabs failed or unconfigured, falling back to Edge-TTS\n")
+    elif provider in QWEN_PROVIDERS:
+        qwen_text = plain_speech_text(cleaned, voice) or cleaned
+        qlang = (lang_override or "").lower().strip()
+        success = synthesize_qwen3(qwen_text, out_path, cfg.get("qwen3_tts", {}), "" if qlang in ("", "auto") else qlang, synth_preset, pitch)
+        if success:
+            if cached_file and os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+                try:
+                    shutil.copyfile(out_path, cached_file)
+                except Exception:
+                    pass
+            print(json.dumps({"success": True, "path": out_path, "provider": "qwen3-tts"}))
+            return
+        if cfg.get("_strict"):
+            print(json.dumps({"success": False, "error": _qwen_last_error or "Qwen3-TTS failed"}))
+            return
+        sys.stderr.write("[TTS] Qwen3-TTS failed or unavailable, falling back to Edge-TTS\n")
     elif provider in ("fish-audio", "fish_audio", "fishaudio"):
         # For Fish Audio, keep full emotion tags intact (e.g. [excited], [giggles], [playful])
         success = synthesize_fish_audio(cleaned, out_path, cfg.get("fish_audio", {}), synth_preset, pitch)
@@ -619,13 +841,7 @@ async def synthesize_speech(text: str, out_path: str, lang_override: str = None,
     emotions = re.findall(r'\[[a-zA-Z0-9_\s\-]+\]', cleaned)
     # Fish Audio performs [laugh]/[giggles] as real laughter; Edge-TTS would read the tag or drop it,
     # so laughter is written out instead ("jajaja" for Spanish voices, "hahaha" otherwise).
-    laugh_word = "jajaja" if str(voice).lower().startswith("es-") else "hahaha"
-    giggle_word = "jiji" if str(voice).lower().startswith("es-") else "hehe"
-    edge_text = re.sub(r'\[(?:laughs?\s+hard|laugh(?:s|ing)?|chuckl(?:e|es|ing))\]', f' {laugh_word}, ', cleaned, flags=re.IGNORECASE)
-    edge_text = re.sub(r'\[(?:giggl(?:e|es|ing))\]', f' {giggle_word}, ', edge_text, flags=re.IGNORECASE)
-    edge_text = re.sub(r'\[[a-zA-Z0-9_,\s\-]+\]', '', edge_text)
-    edge_text = re.sub(r'\s+,', ',', re.sub(r'\s+', ' ', edge_text)).strip(' ,')
-    edge_text = re.sub(r'[{}\[\]"\'`]+', '', edge_text).strip(' ,')
+    edge_text = plain_speech_text(cleaned, voice)
     if not edge_text:
         edge_text = cleaned
 
@@ -877,6 +1093,126 @@ def run_stt_worker(model_name: str = None):
                 err_out["id"] = req_id
             print(json.dumps(err_out), flush=True)
 
+def run_tts_worker():
+    """Keeps the voice model loaded and answers one json line per request."""
+    import io
+    import contextlib
+
+    os.environ["CAPRI_TTS_WORKER"] = "1"
+    if os.environ.get("CAPRI_ALLOW_MODEL_DOWNLOAD") != "1":
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    print(json.dumps({"ready": True, "engine": "tts-worker"}), flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req_id = None
+        try:
+            req = json.loads(line)
+            req_id = req.get("id")
+            if req.get("op") == "design_reference":
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    res = design_reference(req["text"], req.get("description", ""), req.get("lang") or "", req["out"])
+            else:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    loop.run_until_complete(
+                        synthesize_speech(req["text"], req["out"], req.get("lang"), not req.get("noCache", False), req.get("cfg"))
+                    )
+                lines = [l for l in buf.getvalue().splitlines() if l.strip().startswith("{")]
+                res = json.loads(lines[-1]) if lines else {"success": False, "error": "No result"}
+        except Exception as e:
+            res = {"success": False, "error": str(e)}
+        if req_id is not None:
+            res["id"] = req_id
+        if _qwen_state.get("device"):
+            res["device"] = _qwen_state["device"]
+        print(json.dumps(res), flush=True)
+
+
+QWEN_PENDING_MARK = ".capri-download-pending"
+
+
+def qwen_repo_dir(repo: str) -> str:
+    from huggingface_hub import constants
+    return os.path.join(constants.HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
+
+
+def qwen_snapshot_problem(snap: str) -> str:
+    """Why a downloaded snapshot cannot be used, or an empty string when it looks complete."""
+    if not os.path.isdir(snap):
+        return "snapshot folder missing"
+    blobs = os.path.join(os.path.dirname(os.path.dirname(snap)), "blobs")
+    if os.path.isdir(blobs) and any(n.endswith(".incomplete") for n in os.listdir(blobs)):
+        return "download unfinished"
+    weights = 0
+    for root, _dirs, files in os.walk(snap):
+        for name in files:
+            if not os.path.exists(os.path.join(root, name)):  # a link whose file never arrived
+                return f"{name} is missing"
+            if name.endswith((".safetensors", ".bin")):
+                weights += 1
+    if not os.path.exists(os.path.join(snap, "config.json")):
+        return "config.json is missing"
+    if not weights:
+        return "no model weights"
+    index = os.path.join(snap, "model.safetensors.index.json")
+    if os.path.exists(index):
+        try:
+            with open(index, "r", encoding="utf-8") as f:
+                shards = set(json.load(f).get("weight_map", {}).values())
+        except Exception:
+            return "weights index unreadable"
+        for shard in shards:
+            if not os.path.exists(os.path.join(snap, shard)):
+                return f"{shard} is missing"
+    return ""
+
+
+def check_qwen(mode: str, size: str):
+    """Offline: is this model fully on disk? Prints {"ready": bool, "reason": str}."""
+    from huggingface_hub import snapshot_download
+
+    mode = mode if mode in ("custom", "clone", "design") else "custom"
+    size = "1.7B" if mode == "design" or size == "1.7B" else "0.6B"
+    repo = QWEN_TTS_REPOS[(mode, size)]
+    reason = ""
+    if os.path.exists(os.path.join(qwen_repo_dir(repo), QWEN_PENDING_MARK)):
+        reason = "download unfinished"
+    else:
+        try:
+            snap = snapshot_download(repo, local_files_only=True)
+            reason = qwen_snapshot_problem(snap)
+        except Exception:
+            reason = "not downloaded"
+    print(json.dumps({"ready": not reason, "reason": reason, "mode": mode, "size": size}), flush=True)
+
+
+def prepare_qwen(mode: str, size: str):
+    from huggingface_hub import snapshot_download
+    import qwen_tts  # noqa: F401
+    import soundfile  # noqa: F401
+
+    mode = mode if mode in ("custom", "clone", "design") else "custom"
+    size = "1.7B" if mode == "design" or size == "1.7B" else "0.6B"
+    repo = QWEN_TTS_REPOS[(mode, size)]
+    # Left behind if the download stops half way, so the app knows the folder is not usable yet
+    repo_dir = qwen_repo_dir(repo)
+    os.makedirs(repo_dir, exist_ok=True)
+    pending = os.path.join(repo_dir, QWEN_PENDING_MARK)
+    with open(pending, "w", encoding="utf-8") as f:
+        f.write("downloading")
+    path = snapshot_download(repo)
+    problem = qwen_snapshot_problem(path)
+    if problem:
+        raise RuntimeError(f"The Qwen3-TTS download is incomplete: {problem}")
+    os.remove(pending)
+    print(json.dumps({"ready": True, "mode": mode, "size": size, "path": path}), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Capri Voice Engine")
     subparsers = parser.add_subparsers(dest="command")
@@ -898,6 +1234,14 @@ def main():
     worker_parser.add_argument("--model", default=None, help="Whisper model to load first (small, base)")
     subparsers.add_parser("prepare-whisper")
 
+    subparsers.add_parser("tts-worker")
+    qwen_parser = subparsers.add_parser("prepare-qwen")
+    qwen_parser.add_argument("--size", default="0.6B", choices=["0.6B", "1.7B"])
+    qwen_parser.add_argument("--mode", default="custom", choices=["custom", "clone", "design"])
+    check_parser = subparsers.add_parser("check-qwen")
+    check_parser.add_argument("--size", default="0.6B", choices=["0.6B", "1.7B"])
+    check_parser.add_argument("--mode", default="custom", choices=["custom", "clone", "design"])
+
     args = parser.parse_args()
 
     if args.command == "tts":
@@ -908,6 +1252,12 @@ def main():
         os.environ["CAPRI_ALLOW_MODEL_DOWNLOAD"] = "1"
         get_whisper_model()
         print(json.dumps({"ready": True}), flush=True)
+    elif args.command == "tts-worker":
+        run_tts_worker()
+    elif args.command == "prepare-qwen":
+        prepare_qwen(args.mode, args.size)
+    elif args.command == "check-qwen":
+        check_qwen(args.mode, args.size)
     elif args.command == "stt-worker":
         run_stt_worker(getattr(args, 'model', None))
     else:

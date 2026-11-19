@@ -3,6 +3,9 @@ import { MicPicker } from './MicPicker'
 import { SoundSettings } from './SoundSettings'
 import { BehaviorSettings } from './BehaviorSettings'
 import { HotkeySettings } from './HotkeySettings'
+import { GpuBudgetBar } from './GpuBudgetBar'
+import { QwenTtsPanel } from './QwenTtsPanel'
+import { DEFAULT_QWEN_CONFIG, effectiveQwenSize, normalizeQwenConfig, type QwenTtsConfig } from '../../../shared/qwen-tts'
 import { voiceVolume } from '../utils/soundSettings'
 import { useT } from '../utils/useUiLang'
 import {
@@ -27,7 +30,7 @@ import {
 const DEFAULT_FISH_VOICE_ID = 'f6f9169f53244cbfb3bd8ce69bf2db10'
 
 export interface VoiceConfigData {
-  provider: 'edge-tts' | 'elevenlabs' | 'fish-audio'
+  provider: 'edge-tts' | 'elevenlabs' | 'fish-audio' | 'qwen3-tts'
   active_voice: string
   voice_es: string
   voice_ja?: string
@@ -47,6 +50,7 @@ export interface VoiceConfigData {
     model?: string
     format: string
   }
+  qwen3_tts?: QwenTtsConfig
 }
 
 const EDGE_VOICES_EN = [
@@ -87,7 +91,7 @@ interface VoiceSettingsModalProps {
 export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, onClose, embedded = false }) => {
   const t = useT()
   const [musicPlatform, setMusicPlatform] = useState<'youtube_music' | 'spotify'>('spotify')
-  const [provider, setProvider] = useState<'edge-tts' | 'elevenlabs' | 'fish-audio'>('edge-tts')
+  const [provider, setProvider] = useState<'edge-tts' | 'elevenlabs' | 'fish-audio' | 'qwen3-tts'>('edge-tts')
 
   // Edge-TTS State
   const [activeVoiceEn, setActiveVoiceEn] = useState('en-US-AriaNeural')
@@ -110,6 +114,8 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
   const [fishModel, setFishModel] = useState('s2.1-pro-free')
   const [fishFormat, setFishFormat] = useState('mp3')
   const [showFishKey, setShowFishKey] = useState(false)
+
+  const [qwen, setQwen] = useState<QwenTtsConfig>(DEFAULT_QWEN_CONFIG)
 
   // Test Voice & Status
   const [testPhrase, setTestPhrase] = useState('')
@@ -148,6 +154,8 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
           setElStability(cfg.elevenlabs.stability ?? 0.5)
           setElSimilarity(cfg.elevenlabs.similarity_boost ?? 0.75)
         }
+
+        setQwen(normalizeQwenConfig(cfg.qwen3_tts))
 
         if (cfg.fish_audio) {
           setFishApiKey(cfg.fish_audio.api_key || '')
@@ -188,7 +196,8 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
         reference_id: fishRefId.trim() || DEFAULT_FISH_VOICE_ID,
         model: fishModel.trim() || 's2.1-pro-free',
         format: fishFormat
-      }
+      },
+      qwen3_tts: { ...qwen, instruct: qwen.instruct.trim(), clone_ref_text: qwen.clone_ref_text.trim(), design_description: qwen.design_description.trim() }
     }
   }
 
@@ -319,7 +328,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
               <span>{t('vs_engine')}</span>
             </label>
 
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {/* Edge-TTS Tab */}
               <button
                 type="button"
@@ -370,8 +379,33 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
                 </div>
                 <span className="text-[12px] text-stone-400">{t('vs_fishDesc')}</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setProvider('qwen3-tts')}
+                className={`p-3 rounded-none border flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                  provider === 'qwen3-tts'
+                    ? 'bg-cyan-500/15 border-cyan-400 text-white'
+                    : 'bg-black/60 border-stone-800 text-stone-400 hover:border-stone-600 hover:text-stone-200'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 font-bold mb-1">
+                  <Cpu size={14} className={provider === 'qwen3-tts' ? 'text-cyan-400' : 'text-stone-500'} />
+                  <span>Qwen3-TTS</span>
+                </div>
+                <span className="text-[12px] text-stone-400">{t('vs_qwenDesc')}</span>
+              </button>
             </div>
           </div>
+
+          <GpuBudgetBar
+            provider={provider}
+            qwenSize={effectiveQwenSize(qwen)}
+            onPick={(o) => {
+              setProvider(o.id)
+              if (o.size) setQwen((prev) => ({ ...prev, model_size: o.size!, mode: o.size === '0.6B' && prev.mode === 'design' ? 'custom' : prev.mode }))
+            }}
+          />
 
           {/* Provider Specific Settings */}
           {provider === 'edge-tts' && (
@@ -663,6 +697,15 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({ isOpen, 
                 </select>
               </div>
             </div>
+          )}
+
+          {provider === 'qwen3-tts' && (
+            <QwenTtsPanel
+              value={qwen}
+              onChange={(patch) => setQwen((prev) => ({ ...prev, ...patch }))}
+              phrase={testPhrase || t('vs_testPhrase')}
+              onStatus={setStatusMessage}
+            />
           )}
 
           {/* Cyberpunk Robotic dsp Audio Filter & Pitch Shift (Shared across providers) */}
