@@ -9,6 +9,18 @@ import hashlib
 import time
 import shutil
 
+# Certificate paths left behind by an uninstalled program break every model download: a missing
+# SSL_CERT_FILE fails with a bare "[Errno 2] No such file or directory" even when Whisper's model is
+# already on disk, and a missing SSL_CERT_DIR leaves no trusted certificates for a first download
+def any_cert_dir(dirs: str) -> bool:
+    return any(os.path.isdir(d) for d in dirs.split(os.pathsep))
+
+for cert_var, cert_exists in (("SSL_CERT_FILE", os.path.isfile), ("SSL_CERT_DIR", any_cert_dir)):
+    cert_path = os.environ.get(cert_var)
+    if cert_path and not cert_exists(cert_path):
+        sys.stderr.write(f"[Voice] Ignoring {cert_var}, nothing usable at: {cert_path}\n")
+        del os.environ[cert_var]
+
 # Ensure Windows finds PyTorch CUDA DLLs (cublas64_12.dll, etc.) for local GPU acceleration
 script_dir = os.path.dirname(os.path.abspath(__file__))
 torch_lib_candidates = [
