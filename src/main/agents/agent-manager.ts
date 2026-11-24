@@ -38,7 +38,7 @@ export class AgentManager extends EventEmitter {
 
   private config: AgentConfigPayload = {
     mode: 'capri-local',
-    endpoint: 'http://localhost:11434/v1',
+    endpoint: 'http://127.0.0.1:11434/v1',
     model: 'capri',
     apiKey: ''
   }

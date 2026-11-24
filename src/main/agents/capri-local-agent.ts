@@ -367,7 +367,7 @@ export class CapriLocalAgent extends EventEmitter {
     // Her own short commands in any language ("quedate quieta") say which language they are in
     const spokenCommandLang = fixedCommandLanguage(prompt)
     // What the model would get, kept for a request the command shortcuts took and couldn't do
-    this.turn = { spokenPrompt, endpoint: config.endpoint || 'http://localhost:11434/v1', config, handedToModel: false }
+    this.turn = { spokenPrompt, endpoint: config.endpoint || 'http://127.0.0.1:11434/v1', config, handedToModel: false }
     // "How do I make you stay still?", "what can you do?": answered from her catalog, in any language
     const helpRequest = fixedCommand ? null : parseHelpRequest(prompt)
     const detectedLang = heardLang || fixedCommand?.lang || spokenCommandLang || CapriLocalAgent.detectLanguage(prompt.trim())
@@ -519,7 +519,7 @@ export class CapriLocalAgent extends EventEmitter {
       // d) Create a macro
       if (macroService.isCreationRequest(norm)) {
         let macro
-        try { macro = await macroService.createFromSentence(trimmed, config.endpoint || 'http://localhost:11434/v1') }
+        try { macro = await macroService.createFromSentence(trimmed, config.endpoint || 'http://127.0.0.1:11434/v1') }
         catch (error) { this.emitAssistant(error instanceof Error ? error.message : String(error)); this.finishSession(); return }
         this.emitAssistant(
           macro
@@ -642,7 +642,7 @@ export class CapriLocalAgent extends EventEmitter {
     if (isCodingRequest(norm)) {
       const agent = new CodingAgent(
         {
-          endpoint: config.endpoint || 'http://localhost:11434/v1',
+          endpoint: config.endpoint || 'http://127.0.0.1:11434/v1',
           requestedModel: config.model,
           lang: isSpanish ? 'es' : 'en'
         },
@@ -1626,7 +1626,7 @@ export class CapriLocalAgent extends EventEmitter {
     }
 
     // Check if an LLM endpoint (Ollama / LocalAI / OpenRouter) is configured and reachable
-    const endpoint = config.endpoint || 'http://localhost:11434/v1'
+    const endpoint = config.endpoint || 'http://127.0.0.1:11434/v1'
     const requestedModel = config.model || 'capri'
     const targetModel = requestedModel
     const availableModel = await this.resolveAvailableModel(endpoint, targetModel)

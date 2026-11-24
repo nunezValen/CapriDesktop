@@ -293,7 +293,7 @@ export class MacroService {
   }
 
   private async parseWithLlm(sentence: string, endpoint: string): Promise<{ trigger: string; actions: MacroAction[] } | null> {
-    const base = (endpoint || 'http://localhost:11434/v1').replace(/\/+$/, '').replace(/\/v1$/, '')
+    const base = (endpoint || 'http://127.0.0.1:11434/v1').replace(/\/+$/, '').replace(/\/v1$/, '')
     try {
       const tags = await llmFetch(`${base}/api/tags`).then((r) => r.json() as Promise<{ models?: { name: string }[] }>)
       const names = (tags.models || []).map((m) => m.name).filter((n) => !/llava|vision|-vl\b/i.test(n))

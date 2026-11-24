@@ -418,7 +418,7 @@ export class CodingAgent {
   }
 
   private ollamaBase(): string {
-    return (this.opts.endpoint || 'http://localhost:11434/v1').replace(/\/+$/, '').replace(/\/v1$/, '')
+    return (this.opts.endpoint || 'http://127.0.0.1:11434/v1').replace(/\/+$/, '').replace(/\/v1$/, '')
   }
 
   /** Coding needs the strongest coder model available, not the chatty persona model. */

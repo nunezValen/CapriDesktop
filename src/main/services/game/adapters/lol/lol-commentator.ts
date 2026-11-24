@@ -494,7 +494,7 @@ export class LolCommentator {
   // Local LLM (Ollama native API: supports keep_alive + token limits)
 
   private ollamaBase(): string {
-    const ep = agentManager.getConfig().endpoint || 'http://localhost:11434/v1'
+    const ep = agentManager.getConfig().endpoint || 'http://127.0.0.1:11434/v1'
     return ep.replace(/\/+$/, '').replace(/\/v1$/, '')
   }
 

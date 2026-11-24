@@ -77,7 +77,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     '\x1b[32m[STATUS: READY - CYBERPUNK SHELL & AGENT GATEWAY ACTIVE]\x1b[0m\r\n'
   ],
 
-  llmEndpoint: 'http://localhost:11434/v1',
+  llmEndpoint: 'http://127.0.0.1:11434/v1',
   llmModel: '',
   ollamaRunning: false,
   ollamaModels: [],
