@@ -269,12 +269,10 @@ export class ScannerService {
         (!isMac ? sources.find((s) => s.name.toLowerCase().includes(currentDisplay.id.toString())) : undefined) ||
         (sources.length === 1 && screen.getAllDisplays().length === 1 ? sources[0] : undefined)
 
-      if (!targetSource) {
-        return null
+      const thumb = targetSource?.thumbnail
+      if (!thumb || thumb.isEmpty()) {
+        return await this.captureThroughWindows(currentDisplay, { x: cropX, y: cropY, width: cropW, height: cropH }, fullScreen ? 1280 : 1024)
       }
-
-      const thumb = targetSource.thumbnail
-      if (thumb.isEmpty()) return null
       const thumbSize = thumb.getSize()
       const crop = captureCrop(currentDisplay.bounds, {x: cropX, y: cropY, width: cropW, height: cropH}, thumbSize)
       if (!crop) return null
@@ -317,6 +315,21 @@ export class ScannerService {
         win.moveTop()
       }
     }
+  }
+
+  /**
+   * On some Windows PCs with two GPUs, Electron lists the screens without a display id, so none
+   * matches the frame. The Windows capture still works, but it only sees the main display
+   */
+  private async captureThroughWindows(
+    display: Electron.Display,
+    region: { x: number; y: number; width: number; height: number },
+    maxSide: number
+  ): Promise<{ base64: string; width: number; height: number; rawBuffer: Buffer; bitmap: Buffer } | null> {
+    if (process.platform !== 'win32') return null
+    if (display.id !== screen.getPrimaryDisplay().id) throw new Error('Capri can only capture the main display on this PC. Move the frame to the main display.')
+    const capture = await this.captureDisplayRegion(region, maxSide)
+    return capture && { ...capture, bitmap: nativeImage.createFromBuffer(capture.rawBuffer).toBitmap() }
   }
 
   public async captureGameWindow(windowId: string, thumbnailSize = { width: 768, height: 432 }): Promise<string | null> {
