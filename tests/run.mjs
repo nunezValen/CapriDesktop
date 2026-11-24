@@ -35,6 +35,7 @@ execFileSync(process.execPath,['--test','work/scanner-tests.cjs'],{stdio:'inheri
 await build({
   entryPoints:['tests/agent-lifecycle.test.ts'],outfile:'work/agent-lifecycle-tests.cjs',bundle:true,platform:'node',format:'cjs',
   plugins:[{name:'agent-lifecycle-mocks',setup(b){
+    b.onResolve({filter:/^electron$/},()=>({path:mock('electron-mock.ts')}))
     b.onResolve({filter:/capri-local-agent$|script-player$|llm-gateway$|user-profile$|consciousness-service$|shared\/lines$|window-manager$|ollama-service$|roaming-manager$|active-window-service$|pending-result$/},()=>({path:mock('agent-lifecycle-mocks.ts')}))
   }}]
 })

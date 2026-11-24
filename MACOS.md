@@ -76,7 +76,7 @@ Supported macros: apps, URLs, music/media controls, ordinary companion game mode
 
 Validation: 62 focused tests, TypeScript checks, production build and installed signature verification passed. Cloud chat/vision and voice recognition were tested on this Mac. External/Retina displays and clean installation on another Mac remain unverified.
 
-## Native Mac compatibility update (1.0.12)
+## Native Mac compatibility
 
 Current local time/date/day questions are answered from the device clock, including its time zone, without a cloud request. Other Mac chat requests receive current clock context. Historical date questions and explicit search/actions retain their existing routing.
 
@@ -106,3 +106,14 @@ Type `open -a "Firefox"` (or another installed app name), `open ~/Downloads`, `o
 
 
 App names tolerate small spelling mistakes, including swapped letters: “opne firfox and discrod for me choom” opens Firefox and Discord. Exact installed names take priority. A close match shared by multiple apps asks you to name the intended app before any action in the list runs. Short abbreviations, unrelated words and file paths are not guessed. `open -a` uses the same app-name matching.
+
+
+## Upstream 1.0.5 and 1.0.6
+
+The Apple Silicon port is included in the upstream 1.0.6 source. This build includes the 1.0.5 unified settings, companion sizing, language corrections, vision-model setup, installed AI app providers and supporters, plus 1.0.6 logs, bug-report copy, contributors, support, benchmark fixes and model failure reporting. The package version stays 1.0.6.
+
+Mac validation now runs against these versions: updated Electron and service mocks let the scanner and agent lifecycle tests exercise current code. Game detection again honors the Mac request to recognize games that have Windows-only live adapters; it still does not claim live match telemetry on Mac.
+
+Windows-only automatic YouTube/TikTok mouse and browser-tab controls are not implemented on Mac. Native Mac app/browser launching, Spotify controls, manual scanning and the existing opt-in Mac screen comments remain available. AI app providers require their own installed CLI and user sign-in; their accounts are not bundled.
+
+Build with Python 3.11 and FFmpeg installed separately: `npm ci`, `npm run typecheck`, `npm run test:mac`, then `npm run dist:mac`. Outputs are in `release/`. The local signing hook uses an available Apple Development identity or falls back to ad hoc signing; this is not a notarized public release.

@@ -18,3 +18,7 @@ export const roamingManager={}
 export const activeWindowService={}
 export const hasPendingResult=()=>false
 export const openPendingResult=()=>{}
+
+let localModel = 'test'
+export const getLocalModel = () => localModel
+export const setLocalModel = (model: string) => { localModel = model }

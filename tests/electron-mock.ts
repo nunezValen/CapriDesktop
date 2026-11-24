@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-export const app = { getPath: () => process.env.CAPRI_TEST_DATA!, getAppPath: () => process.cwd(), isPackaged: false, getVersion:()=> '1.0.4-mac.13' }
+export const app = { whenReady: () => Promise.resolve(), getPath: () => process.env.CAPRI_TEST_DATA!, getAppPath: () => process.cwd(), isPackaged: false, getVersion:()=> '1.0.4-mac.13' }
 export const safeStorage = {
   isEncryptionAvailable: () => true,
   encryptString: (s: string) => Buffer.from(`test-only:${s}`),
@@ -20,4 +20,9 @@ export class BrowserWindow extends EventEmitter {
   static getAllWindows() {
     return []
   }
+}
+
+// Synthetic images keep their original bytes; real resizing is checked in Electron.
+export const nativeImage = {
+  createFromBuffer: () => ({ getSize: () => ({ width: 0, height: 0 }) }),
 }

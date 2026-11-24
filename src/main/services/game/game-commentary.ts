@@ -40,7 +40,7 @@ export interface ForegroundApp {
 
 export function detectGameName(app: ForegroundApp, includeAdapted = false): string | null {
   const exe = app.path.split(/[\\/]/).pop() || ''
-  if (NOT_A_GAME.test(exe) || NOT_A_GAME.test(app.process) || HAS_OWN_ADAPTER.test(app.process)) return null
+  if (NOT_A_GAME.test(exe) || NOT_A_GAME.test(app.process) || (!includeAdapted && HAS_OWN_ADAPTER.test(app.process))) return null
 
   let name: string | null = null
   for (const pattern of GAME_FOLDER_PATTERNS) {

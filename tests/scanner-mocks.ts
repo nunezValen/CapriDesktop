@@ -7,7 +7,7 @@ export const desktopCapturer={getSources:async()=>[{display_id:'1',thumbnail:ima
 const display={id:1,bounds:{x:0,y:0,width:800,height:600},scaleFactor:1}
 export const screen={getPrimaryDisplay:()=>display,getDisplayNearestPoint:()=>display,getCursorScreenPoint:()=>({x:0,y:0}),getAllDisplays:()=>[display]}
 export const systemPreferences={getMediaAccessStatus:()=>state.permission}
-export const windowManager={getScannerWindow:()=>win,showScanner:()=>{state.visible=true},hideScanner:()=>{state.visible=false},broadcast:()=>{}}
+export const windowManager={isScannerFullscreenActive:()=>false,getScannerWindow:()=>win,showScanner:()=>{state.visible=true},hideScanner:()=>{state.visible=false},broadcast:()=>{}}
 export const agentManager={getStatus:()=>({isRunning:false}),getCompanionState:()=> 'standing',setCompanionState:()=>{},setCompanionSpeech:(text:string)=>state.spoken.push(text)}
 export const consciousnessService={getScannerContinuous:()=>state.continuous,setScannerContinuous:(value:boolean)=>{state.continuous=value},getScannerBounds:()=>win.getBounds(),getLearnedConcepts:()=>[],setLastScannedContext:()=>{},setPendingScanLearning:()=>{},getPreferredLanguage:()=> 'en'}
 export const isCloudMode=()=>state.cloud
@@ -21,3 +21,18 @@ export const describeLocalImage=async()=>{throw new Error('Local model must not 
 export const ollamaService={ensureRunning:async()=>{throw new Error('Local model must not start')}}
 export const macGameContext={prompt:()=> 'Your partner is playing ULTRAKILL.'}
 export const isMac=true
+
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+const scannerData = mkdtempSync(path.join(tmpdir(), 'capri-scanner-test-'))
+process.on('exit', () => rmSync(scannerData, { recursive: true, force: true }))
+export const app = { getPath: () => scannerData, getVersion: () => '1.0.6' }
+export const nativeImage = { createFromBuffer: () => image }
+export const isWindows = false
+export const findOnPath = () => null
+export const VISION_NUM_CTX = 2048
+export const ollamaErrorText = async () => 'test provider error'
+export const isAiAppMode = () => false
+export const getLlmSettings = () => ({})
+export const warmQuickAnswers = async () => {}
