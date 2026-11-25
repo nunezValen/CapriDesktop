@@ -26,6 +26,7 @@ import * as os from 'os'
 import * as fs from 'fs'
 import * as path from 'path'
 import { exec } from '../../services/hidden-process'
+import { shellCommandFor } from './content-tool-calls'
 import { app, shell } from 'electron'
 import { consciousnessService } from '../../services/consciousness-service'
 import { resolveMusicPlatform, musicPlatformName, type PlaybackPlatform } from '../../services/music-platform'
@@ -433,7 +434,7 @@ export class ToolExecutor {
   ): Promise<{ success: boolean; output: string }> {
     return new Promise((resolve) => {
       exec(
-        command,
+        shellCommandFor(command, process.platform),
         {
           cwd,
           timeout: 25000,

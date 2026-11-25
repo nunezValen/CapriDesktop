@@ -29,6 +29,7 @@ import { spawn, ChildProcess } from '../services/hidden-process'
 import { app } from 'electron'
 import { AgentEventPayload, CompanionEmotionState, IPC_CHANNELS } from '../ipc/channels'
 import { CAPRI_TOOLS, ToolExecutor } from './tools/tool-executor'
+import { asksHowToNotToRun, hasPlaceholderCommand, isExampleToolReply, stripToolCallJson } from './tools/content-tool-calls'
 import { ollamaService } from '../services/ollama-service'
 import { windowManager } from '../windows/window-manager'
 import { roamingManager } from '../roaming/roaming-manager'
@@ -1941,6 +1942,7 @@ LANGUAGE RULE: ${langDirective}`
 
         // Identify active tool calls (either via standard OpenAI message.tool_calls or embedded <tools>/<tool_call> in content)
         let activeToolCalls: { id?: string; name: string; args: Record<string, unknown> }[] = []
+        let shownExample = false
 
         if (message.tool_calls && message.tool_calls.length > 0) {
           activeToolCalls = message.tool_calls.map((tc: any) => {
@@ -1954,17 +1956,26 @@ LANGUAGE RULE: ${langDirective}`
           })
         } else if (message.content && /<tools?>|<tool_call>|write_file|create_file|run_command|open_application|close_application|web_search|fetch_web_page|find_files|"name"\s*:/i.test(message.content)) {
           activeToolCalls = this.parseContentToolCalls(message.content)
+          // A command shown inside an explanation, or one the user only asked about, doesn't run (issue #57)
+          const content = message.content
+          const before = activeToolCalls.length
+          activeToolCalls = activeToolCalls.filter(
+            (tc) =>
+              tc.name !== 'run_command' ||
+              (!isExampleToolReply(content) && !hasPlaceholderCommand(String(tc.args.command || '')) && !asksHowToNotToRun(prompt))
+          )
+          if (activeToolCalls.length < before) shownExample = true
         }
 
         // Automatic PowerShell / Shell command detection and execution if LLM generated a code block instead of invoking tools
-        if (allowTools && activeToolCalls.length === 0 && message.content) {
+        if (allowTools && activeToolCalls.length === 0 && !shownExample && message.content) {
           const codeBlock = message.content.match(/```(?:powershell|cmd|bash|sh|ps1)?\s*([\s\S]*?)```/i)
           if (codeBlock) {
             const rawCmd = codeBlock[1].trim()
             // Code the model merely showed is only auto-run when it can't destroy anything:
             // deleting, moving or formatting from an explanation the user never asked for is out
             const destructive = /(?<![\w-])(?:del|erase|rd|rmdir|rm|Remove-Item|ri|format|diskpart|move|mv|Move-Item|Clear-Content|Stop-Computer|Restart-Computer|shutdown|reg\s+delete|takeown|icacls|cipher)(?![\w-])/i
-            if (rawCmd && !rawCmd.startsWith('//') && !destructive.test(rawCmd) && /(?:New-Item|Set-Content|Add-Content|mkdir|echo|Get-|npm|git|dir|copy|cp)/i.test(rawCmd)) {
+            if (rawCmd && !rawCmd.startsWith('//') && !destructive.test(rawCmd) && !hasPlaceholderCommand(rawCmd) && /(?:New-Item|Set-Content|Add-Content|mkdir|echo|Get-|npm|git|dir|copy|cp)/i.test(rawCmd)) {
               activeToolCalls.push({
                 name: 'run_command',
                 args: { command: rawCmd }
@@ -1993,7 +2004,8 @@ LANGUAGE RULE: ${langDirective}`
           continue
         }
 
-        let cleanedContent = (partialReply + (message.content || ''))
+        const replyContent = partialReply + (message.content || '')
+        let cleanedContent = (shownExample ? stripToolCallJson(replyContent) : replyContent)
           // Models that think out loud
           .replace(/<think>[\s\S]*?<\/think>/gi, '')
           .replace(/```(?:powershell|cmd|bash|sh|ps1)\s*[\s\S]*?```/gi, '')
