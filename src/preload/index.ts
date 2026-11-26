@@ -11,6 +11,8 @@ import type { CyberpunkFolderInfo, CyberpunkFoldersState } from '../main/service
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import type { HotkeyAction, HotkeyProblem, Hotkeys } from '../shared/hotkeys'
 import type { BenchmarkRequest, BenchmarkResult } from '../shared/benchmark'
+import type { QwenTtsConfig } from '../shared/qwen-tts'
+import type { GpuBudget, QwenTtsSize, TtsProviderId } from '../shared/gpu-budget'
 import type { BugReportResult, LogLine } from '../shared/logs'
 import {
   IPC_CHANNELS,
@@ -411,7 +413,8 @@ const api = {
   // System Utilities & Project Files
   setup: {
     getStatus: (): Promise<any> => ipcRenderer.invoke(IPC_CHANNELS.SETUP_STATUS),
-    run: (step: string): Promise<{ ok: boolean; status: any }> => ipcRenderer.invoke(IPC_CHANNELS.SETUP_RUN, step),
+    run: (step: string, options?: { qwen?: Partial<QwenTtsConfig> }): Promise<{ ok: boolean; status: any }> => ipcRenderer.invoke(IPC_CHANNELS.SETUP_RUN, step, options),
+    qwenStatus: (qwen?: Partial<QwenTtsConfig>): Promise<{ ready: boolean; reason: string }> => ipcRenderer.invoke(IPC_CHANNELS.SETUP_QWEN_STATUS, qwen),
     onLog: (callback: (entry: { step: string; line: string }) => void): (() => void) => {
       const sub = (_e: IpcRendererEvent, entry: { step: string; line: string }): void => callback(entry)
       ipcRenderer.on(IPC_CHANNELS.SETUP_LOG, sub)
@@ -465,6 +468,14 @@ const api = {
     synthesize: (text: string, langOverride?: string): Promise<{ success: boolean; audioDataUrl?: string; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.VOICE_SYNTHESIZE, text, langOverride),
 
+    previewQwen: (text: string, qwen: Partial<QwenTtsConfig>): Promise<{ success: boolean; audioDataUrl?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.VOICE_QWEN_PREVIEW, text, qwen),
+    pickReference: (): Promise<{ path: string; name: string } | null> => ipcRenderer.invoke(IPC_CHANNELS.VOICE_PICK_REFERENCE),
+    transcribeReference: (file: string): Promise<{ success: boolean; text?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.VOICE_TRANSCRIBE_REFERENCE, file),
+    designReference: (text: string, description: string, lang?: string): Promise<{ success: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.VOICE_DESIGN_REFERENCE, text, description, lang),
+
     getConfig: (): Promise<any> =>
       ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_CONFIG),
 
@@ -497,6 +508,10 @@ const api = {
 
   benchmark: {
     run: (req: BenchmarkRequest): Promise<BenchmarkResult> => ipcRenderer.invoke(IPC_CHANNELS.BENCHMARK_RUN, req)
+  },
+
+  gpu: {
+    budget: (preview?: { provider?: TtsProviderId; qwenSize?: QwenTtsSize }): Promise<GpuBudget> => ipcRenderer.invoke(IPC_CHANNELS.GPU_BUDGET_GET, preview)
   },
 
   // Her logs: the bug report and the live view in Settings

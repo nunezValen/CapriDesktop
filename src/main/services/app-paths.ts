@@ -6,6 +6,7 @@
 import { storageDir } from './storage-location'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as os from 'os'
 import { app } from 'electron'
 import { isMac, isWindows, findOnPath } from './platform'
 
@@ -87,4 +88,9 @@ export function envFilePath(): string {
 /** Keep Mac speech caches consistent with optional relocated requirements. */
 export function speechModelsDir(): string {
   return storageDir('whisper') || path.join(app.getPath('userData'),'speech-models')
+}
+
+/** Shared Hugging Face cache for Qwen setup, playback, inventory and storage moves. */
+export function huggingFaceHome(): string {
+  return isMac ? speechModelsDir() : storageDir('whisper') || process.env.HF_HOME || path.join(os.homedir(), '.cache', 'huggingface')
 }

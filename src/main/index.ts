@@ -158,6 +158,9 @@ if (!gotTheLock) {
     try {
       voiceService.ensureWorker()
     } catch {}
+    try {
+      voiceService.warmQwen()
+    } catch {}
 
     // Auto-start Ollama in background if installed and not yet running
     ollamaService.ensureRunning().catch((err) => {
@@ -193,5 +196,7 @@ if (!gotTheLock) {
     ollamaService.stop()
     closeAiAppSessions()
     closeScreenWorker()
+    // The voice workers (Whisper and Qwen3-TTS) would keep their models, and the GPU memory, after the app closes
+    voiceService.stopServer()
   })
 }

@@ -19,6 +19,9 @@ import { terminalManager } from '../terminal/terminal-manager'
 import { roamingManager } from '../roaming/roaming-manager'
 import { voiceService } from '../services/voice-service'
 import { benchmarkService } from '../services/benchmark-service'
+import type { QwenTtsConfig } from '../../shared/qwen-tts'
+import { voiceDataDir } from '../services/app-paths'
+import { computeGpuBudget, type BudgetPreview } from '../services/gpu-budget-service'
 import type { BenchmarkRequest } from '../../shared/benchmark'
 import { checkAddressed } from '../services/wake-word'
 import { consciousnessService } from '../services/consciousness-service'
@@ -328,11 +331,17 @@ export function registerIpcHandlers(): void {
   // First-run setup (onboarding window)
   ipcMain.handle(IPC_CHANNELS.SETUP_STATUS, () => setupService.getStatus())
 
-  ipcMain.handle(IPC_CHANNELS.SETUP_RUN, async (_event, step: SetupStep) => {
-    if (!['python','ffmpeg','ollama','model','persona','whisper','vision'].includes(step)) throw new Error('Unknown setup step')
-    const ok = await setupService.run(step, (s, line) => windowManager.broadcast(IPC_CHANNELS.SETUP_LOG, { step: s, line }))
+  // Only the model chosen in the panel travels along: the install never saves or activates anything
+  const qwenChoice = (raw: unknown): Partial<QwenTtsConfig> | undefined =>
+    raw && typeof raw === 'object' ? { mode: (raw as QwenTtsConfig).mode, model_size: (raw as QwenTtsConfig).model_size } : undefined
+
+  ipcMain.handle(IPC_CHANNELS.SETUP_RUN, async (_event, step: SetupStep, options?: { qwen?: Partial<QwenTtsConfig> }) => {
+    if (!['python','ffmpeg','ollama','model','persona','whisper','vision','qwen3tts'].includes(step)) throw new Error('Unknown setup step')
+    const ok = await setupService.run(step, (s, line) => windowManager.broadcast(IPC_CHANNELS.SETUP_LOG, { step: s, line }), { qwen: qwenChoice(options?.qwen) })
     return { ok, status: await setupService.getStatus() }
   })
+
+  ipcMain.handle(IPC_CHANNELS.SETUP_QWEN_STATUS, (_event, qwen?: Partial<QwenTtsConfig>) => setupService.qwenStatus(qwenChoice(qwen)))
 
   ipcMain.handle(IPC_CHANNELS.DISPLAYS_LIST, () => windowManager.listDisplays())
   ipcMain.handle(IPC_CHANNELS.DISPLAYS_MOVE, (_event, id: number) => windowManager.moveCompanionToDisplay(id))
@@ -681,7 +690,7 @@ export function registerIpcHandlers(): void {
     return consciousnessService.getScannerVisionModel()
   })
   ipcMain.handle(IPC_CHANNELS.PARTS_LIST, () => listInstalledParts())
-  ipcMain.handle(IPC_CHANNELS.PART_REMOVE, (_event, id: string) => (['voiceEnv', 'whisper', 'ffmpeg'].includes(id) ? removeInstalledPart(id as InstalledPartId) : listInstalledParts()))
+  ipcMain.handle(IPC_CHANNELS.PART_REMOVE, (_event, id: string) => (['voiceEnv', 'whisper', 'ffmpeg', 'qwen3tts'].includes(id) ? removeInstalledPart(id as InstalledPartId) : listInstalledParts()))
 
   // The user's AI apps, as her model
   ipcMain.handle(IPC_CHANNELS.AI_APPS_LIST, () => listAiApps())
@@ -728,8 +737,61 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC_CHANNELS.VOICE_QWEN_PREVIEW, async (_event, text: string, qwen: Partial<QwenTtsConfig>) => {
+    try {
+      return await voiceService.synthesize(String(text || ''), undefined, { silent: true, fresh: true, qwenPreview: qwen || {} })
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) }
+    }
+  })
+
+  const cloneDir = (): string => path.join(voiceDataDir(), 'clone')
+  const insideCloneDir = (file: string): boolean => {
+    const root = path.resolve(cloneDir()) + path.sep
+    return path.resolve(String(file || '')).startsWith(root)
+  }
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_PICK_REFERENCE, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'opus', 'webm', 'aac'] }]
+    }
+    const picked = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const file = picked.filePaths[0]
+    if (picked.canceled || !file) return null
+    fs.mkdirSync(cloneDir(), { recursive: true })
+    const safeName = path.basename(file).replace(/[^\w.\-]+/g, '_')
+    const copy = path.join(cloneDir(), `ref_${Date.now()}_${safeName}`)
+    fs.copyFileSync(file, copy)
+    return { path: copy, name: path.basename(file) }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_TRANSCRIBE_REFERENCE, async (_event, file: string) => {
+    if (!insideCloneDir(file) || !fs.existsSync(file)) return { success: false, error: 'Reference audio not found' }
+    try {
+      return await voiceService.transcribeReference(file)
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) }
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.VOICE_DESIGN_REFERENCE, async (_event, text: string, description: string, lang?: string) => {
+    try {
+      return await voiceService.designReference(String(text || ''), String(description || ''), lang)
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) }
+    }
+  })
+
   ipcMain.handle(IPC_CHANNELS.BENCHMARK_RUN, async (_event, req: BenchmarkRequest) => {
     return benchmarkService.run(req)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.GPU_BUDGET_GET, async (_event, preview?: BudgetPreview) => {
+    const provider = ['edge-tts', 'elevenlabs', 'fish-audio', 'qwen3-tts'].includes(String(preview?.provider)) ? preview?.provider : undefined
+    const qwenSize = preview?.qwenSize === '1.7B' ? '1.7B' : preview?.qwenSize === '0.6B' ? '0.6B' : undefined
+    return computeGpuBudget({ provider, qwenSize })
   })
 
   ipcMain.handle(IPC_CHANNELS.VOICE_GET_CONFIG, async () => {
